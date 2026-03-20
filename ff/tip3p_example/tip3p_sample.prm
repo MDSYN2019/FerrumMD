@@ -1,0 +1,31 @@
+* Minimal CHARMM-style TIP3P parameter file for testing
+* Not a full production force field; intended for parser/unit tests
+*
+
+BONDS
+!
+! atom types   Kb (kcal/mol/A^2)   b0 (A)
+HT   OT        450.0               0.9572
+HT   HT          0.0               1.5139   ! helper distance for rigid water setups
+
+ANGLES
+!
+! atom types   Ktheta (kcal/mol/rad^2)   Theta0 (deg)
+HT   OT   HT   55.0                     104.52
+
+DIHEDRALS
+!
+! none required for 3-site water
+
+IMPROPER
+!
+! none required
+
+NONBONDED nbxmod  5 atom cdiel shift vatom vdistance vswitch -
+cutnb 14.0 ctofnb 12.0 ctonnb 10.0 eps 1.0 e14fac 1.0 wmin 1.5
+!
+! atom    ignored   epsilon (kcal/mol)   Rmin/2 (A)
+HT        0.0       -0.0460              0.2245
+OT        0.0       -0.1521              1.7682
+
+END

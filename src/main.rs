@@ -22,9 +22,28 @@ use mpi::traits::*;
 use std::env;
 
 use sang_md::lennard_jones_simulations; // this is in lib
+use sang_md::molecule::charmm;
+use sang_md::molecule::martini; // This module contains the itp reader
 use sang_md::molecule::molecule;
 
 fn main() {
+    // let's try reading in a water forcefield
+    let tip3p_forcefield_string = charmm::CharmmForceField::read_file_new(
+        "/home/sang/Desktop/Sandbox/rust/FerrumMD/ff/tip3p_example/tip3p_sample.rtf",
+    );
+
+    println!(
+        "We have the following string as a water tip3p forcefield
+         \n\n
+         The atom types we have is as follows: {:?}
+         The residue names we have is as follows: {:?}
+         The bonds we have is as follows: {:?}
+         ",
+        tip3p_forcefield_string.clone().unwrap().atom_types,
+        tip3p_forcefield_string.clone().unwrap().residue_name,
+        tip3p_forcefield_string.clone().unwrap().bonds,
+    );
+
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let integrator = env::args()
