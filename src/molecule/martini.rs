@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fs;
 
 #[derive(Clone, Debug, Default)]
-pub struct MartiniAtomType {
+pub struct ItpAtomType {
     pub name: String,
     pub mass: f64,
     pub charge: f64,
@@ -16,7 +16,7 @@ pub struct MartiniAtomType {
 }
 
 #[derive(Clone, Debug)]
-pub struct MartiniAtom {
+pub struct ItpAtom {
     pub index: usize,
     pub type_name: String,
     pub charge: f64,
@@ -24,7 +24,7 @@ pub struct MartiniAtom {
 }
 
 #[derive(Clone, Debug)]
-pub struct MartiniBond {
+pub struct ItpBond {
     pub atom1: usize,
     pub atom2: usize,
     pub length: f64,
@@ -32,7 +32,7 @@ pub struct MartiniBond {
 }
 
 #[derive(Clone, Debug)]
-pub struct MartiniAngle {
+pub struct ItpAngle {
     pub atom1: usize,
     pub atom2: usize,
     pub atom3: usize,
@@ -41,7 +41,7 @@ pub struct MartiniAngle {
 }
 
 #[derive(Clone, Debug)]
-pub struct MartiniDihedral {
+pub struct ItpDihedral {
     pub atom1: usize,
     pub atom2: usize,
     pub atom3: usize,
@@ -52,18 +52,18 @@ pub struct MartiniDihedral {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct MartiniForceField {
+pub struct ItpForceField {
     pub molecule_name: Option<String>,
-    pub atom_types: HashMap<String, MartiniAtomType>,
-    pub atoms: Vec<MartiniAtom>,
-    pub bonds: Vec<MartiniBond>,
-    pub angles: Vec<MartiniAngle>,
-    pub dihedrals: Vec<MartiniDihedral>,
+    pub atom_types: HashMap<String, ItpAtomType>,
+    pub atoms: Vec<ItpAtom>,
+    pub bonds: Vec<ItpBond>,
+    pub angles: Vec<ItpAngle>,
+    pub dihedrals: Vec<ItpDihedral>,
 }
 
-impl MartiniForceField {
+impl ItpForceField {
     pub fn parse_str(contents: &str) -> Result<Self, String> {
-        let mut ff = MartiniForceField::default();
+        let mut ff = ItpForceField::default();
         let mut section = String::new();
 
         for (line_number, raw_line) in contents.lines().enumerate() {
@@ -123,7 +123,7 @@ impl MartiniForceField {
         }
 
         if ff.atoms.is_empty() {
-            return Err("martini input did not contain an [ atoms ] section".to_string());
+            return Err("itp input did not contain an [ atoms ] section".to_string());
         }
 
         Ok(ff)
@@ -131,7 +131,7 @@ impl MartiniForceField {
 
     pub fn read_itp(path: &str) -> Result<Self, String> {
         let contents = fs::read_to_string(path)
-            .map_err(|e| format!("failed to read martini file at '{path}': {e}"))?;
+            .map_err(|e| format!("failed to read itp file at '{path}': {e}"))?;
         Self::parse_str(&contents)
     }
 
@@ -218,14 +218,42 @@ impl MartiniForceField {
     }
 }
 
-fn parse_atomtype(tokens: &[&str]) -> Result<MartiniAtomType, String> {
-    if tokens.len() < 5 {
-        return Err("atomtypes row requires at least 5 columns".to_string());
+fn parse_atomtype(tokens: &[&str]) -> Result<ItpAtomType, String> {
+    if tokens.len() < 6 {
+        return Err("atomtypes row requires at least 6 columns".to_string());
     }
 
     let name = tokens[0].to_string();
-    let mass = parse_f64(tokens, 1, "atomtype mass")?;
-    let charge = parse_f64(tokens, 2, "atomtype charge")?;
+    let ptype_index = tokens
+        .iter()
+        .enumerate()
+        .skip(1)
+        .find(|(_, token)| token.chars().all(|c| c.is_ascii_alphabetic()))
+        .map(|(idx, _)| idx);
+
+    let (mass, charge) = if let Some(ptype_idx) = ptype_index {
+        if ptype_idx < 3 {
+            return Err("atomtypes row missing mass/charge before ptype".to_string());
+        }
+        (
+            parse_f64(tokens, ptype_idx - 2, "atomtype mass")?,
+            parse_f64(tokens, ptype_idx - 1, "atomtype charge")?,
+        )
+    } else {
+        let numeric_indices: Vec<usize> = tokens
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter_map(|(idx, token)| token.parse::<f64>().ok().map(|_| idx))
+            .collect();
+        if numeric_indices.len() < 4 {
+            return Err("atomtypes row missing numeric mass/charge parameters".to_string());
+        }
+        (
+            parse_f64(tokens, numeric_indices[0], "atomtype mass")?,
+            parse_f64(tokens, numeric_indices[1], "atomtype charge")?,
+        )
+    };
 
     // Martini files can encode either sigma/epsilon or C6/C12 in the last 2 columns.
     let maybe_a = tokens
@@ -247,7 +275,7 @@ fn parse_atomtype(tokens: &[&str]) -> Result<MartiniAtomType, String> {
         (None, None, Some(maybe_a), Some(maybe_b))
     };
 
-    Ok(MartiniAtomType {
+    Ok(ItpAtomType {
         name,
         mass,
         charge,
@@ -258,7 +286,7 @@ fn parse_atomtype(tokens: &[&str]) -> Result<MartiniAtomType, String> {
     })
 }
 
-fn parse_atom(tokens: &[&str]) -> Result<MartiniAtom, String> {
+fn parse_atom(tokens: &[&str]) -> Result<ItpAtom, String> {
     if tokens.len() < 7 {
         return Err("atoms row requires at least 7 columns".to_string());
     }
@@ -272,7 +300,7 @@ fn parse_atom(tokens: &[&str]) -> Result<MartiniAtom, String> {
         None
     };
 
-    Ok(MartiniAtom {
+    Ok(ItpAtom {
         index,
         type_name,
         charge,
@@ -280,12 +308,12 @@ fn parse_atom(tokens: &[&str]) -> Result<MartiniAtom, String> {
     })
 }
 
-fn parse_bond(tokens: &[&str]) -> Result<MartiniBond, String> {
+fn parse_bond(tokens: &[&str]) -> Result<ItpBond, String> {
     if tokens.len() < 5 {
         return Err("bonds row requires at least 5 columns".to_string());
     }
 
-    Ok(MartiniBond {
+    Ok(ItpBond {
         atom1: parse_usize(tokens, 0, "bond atom1")?,
         atom2: parse_usize(tokens, 1, "bond atom2")?,
         length: parse_f64(tokens, 3, "bond length")?,
@@ -293,12 +321,12 @@ fn parse_bond(tokens: &[&str]) -> Result<MartiniBond, String> {
     })
 }
 
-fn parse_angle(tokens: &[&str]) -> Result<MartiniAngle, String> {
+fn parse_angle(tokens: &[&str]) -> Result<ItpAngle, String> {
     if tokens.len() < 6 {
         return Err("angles row requires at least 6 columns".to_string());
     }
 
-    Ok(MartiniAngle {
+    Ok(ItpAngle {
         atom1: parse_usize(tokens, 0, "angle atom1")?,
         atom2: parse_usize(tokens, 1, "angle atom2")?,
         atom3: parse_usize(tokens, 2, "angle atom3")?,
@@ -307,12 +335,12 @@ fn parse_angle(tokens: &[&str]) -> Result<MartiniAngle, String> {
     })
 }
 
-fn parse_dihedral(tokens: &[&str]) -> Result<MartiniDihedral, String> {
+fn parse_dihedral(tokens: &[&str]) -> Result<ItpDihedral, String> {
     if tokens.len() < 8 {
         return Err("dihedrals row requires at least 8 columns".to_string());
     }
 
-    Ok(MartiniDihedral {
+    Ok(ItpDihedral {
         atom1: parse_usize(tokens, 0, "dihedral atom1")?,
         atom2: parse_usize(tokens, 1, "dihedral atom2")?,
         atom3: parse_usize(tokens, 2, "dihedral atom3")?,
@@ -323,7 +351,7 @@ fn parse_dihedral(tokens: &[&str]) -> Result<MartiniDihedral, String> {
     })
 }
 
-fn infer_lj_parameters(atom_type: &MartiniAtomType) -> Result<(f64, f64), String> {
+fn infer_lj_parameters(atom_type: &ItpAtomType) -> Result<(f64, f64), String> {
     if let (Some(sigma), Some(epsilon)) = (atom_type.sigma, atom_type.epsilon) {
         return Ok((sigma, epsilon));
     }
@@ -345,6 +373,13 @@ fn infer_lj_parameters(atom_type: &MartiniAtomType) -> Result<(f64, f64), String
         atom_type.name
     ))
 }
+
+pub type MartiniAtomType = ItpAtomType;
+pub type MartiniAtom = ItpAtom;
+pub type MartiniBond = ItpBond;
+pub type MartiniAngle = ItpAngle;
+pub type MartiniDihedral = ItpDihedral;
+pub type MartiniForceField = ItpForceField;
 
 fn parse_f64(tokens: &[&str], index: usize, label: &str) -> Result<f64, String> {
     tokens
@@ -420,5 +455,28 @@ C1   72.0 0.0 A 2.0 1.0
 
         assert!(sigma > 0.0);
         assert!(epsilon > 0.0);
+    }
+
+    #[test]
+    fn parses_general_gromacs_atomtypes_layout() {
+        let itp = r#"
+[ atomtypes ]
+; name at.num mass charge ptype sigma epsilon
+opls_001 6 12.011 0.0 A 0.355 0.276144
+[ atoms ]
+1 opls_001 1 ETH C1 1 0.0 12.011
+"#;
+
+        let ff = ItpForceField::parse_str(itp).expect("itp parsing should succeed");
+        let atom_type = ff
+            .atom_types
+            .get("opls_001")
+            .expect("atomtype should exist");
+
+        assert!((atom_type.mass - 12.011).abs() < 1e-12);
+        assert!((atom_type.charge - 0.0).abs() < 1e-12);
+        let (sigma, epsilon) = infer_lj_parameters(atom_type).expect("lj inference should succeed");
+        assert!((sigma - 0.355).abs() < 1e-12);
+        assert!((epsilon - 0.276144).abs() < 1e-12);
     }
 }
