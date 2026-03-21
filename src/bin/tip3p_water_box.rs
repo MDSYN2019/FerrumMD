@@ -75,6 +75,13 @@ fn main() -> Result<(), String> {
         "TIP3P water box",
     )?;
 
+    //write_xtc(
+    //    "martini_water_box.xtc",
+    //    &frames,
+    //    Vector3::new(box_length, box_length, box_length),
+    //    dt as f32,
+    //)?;
+
     let atom_count: usize = systems.iter().map(|system| system.atoms.len()).sum();
     println!(
         "Wrote tip3p_water_box.gro for {} molecules ({} atoms)",
