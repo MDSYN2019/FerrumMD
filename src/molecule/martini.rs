@@ -402,6 +402,10 @@ fn infer_lj_parameters(atom_type: &ItpAtomType) -> Result<(f64, f64), String> {
     }
 
     if let (Some(c6), Some(c12)) = (atom_type.c6, atom_type.c12) {
+        // Some force fields (e.g., TIP3P hydrogens) intentionally set both C6/C12 to zero.
+        if c6 == 0.0 && c12 == 0.0 {
+            return Ok((0.0, 0.0));
+        }
         if c6 <= 0.0 || c12 <= 0.0 {
             return Err(format!(
                 "atom type '{}' has non-positive C6/C12",
