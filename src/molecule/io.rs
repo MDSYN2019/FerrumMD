@@ -302,6 +302,63 @@ pub fn write_xtc(
         .map_err(|e| format!("failed to flush xtc trajectory: {e}"))
 }
 
+pub fn write_xtc_system(
+    path: &str,
+    frames: &[Vec<System>],
+    box_dims: Vector3<f64>,
+    dt_ps: f32,
+) -> Result<(), String> {
+    if frames.is_empty() {
+        return Err("cannot write xtc with zero frames".to_string());
+    }
+
+    let natoms = frames[0].len();
+    if natoms == 0 {
+        return Err("cannot write xtc with zero atoms".to_string());
+    }
+
+    for (idx, frame) in frames.iter().enumerate() {
+        if frame.len() != natoms {
+            return Err(format!(
+                "xtc frame {idx} has {} atoms but expected {natoms}",
+                frame.len()
+            ));
+        }
+    }
+
+    let mut trajectory =
+        XTCTrajectory::open_write(path).map_err(|e| format!("failed to open xtc file: {e}"))?;
+
+    let box_nm = [
+        [box_dims.x as f32 / 10.0, 0.0, 0.0],
+        [0.0, box_dims.y as f32 / 10.0, 0.0],
+        [0.0, 0.0, box_dims.z as f32 / 10.0],
+    ];
+
+    for (step, frame_particles) in frames.iter().enumerate() {
+        let mut frame = Frame::with_len(natoms);
+        frame.step = step;
+        frame.time = step as f32 * dt_ps;
+        frame.box_vector = box_nm;
+
+        for (atom_idx, particle) in frame_particles.iter().enumerate() {
+            frame.coords[atom_idx] = [
+                particle.position.x as f32 / 10.0,
+                particle.position.y as f32 / 10.0,
+                particle.position.z as f32 / 10.0,
+            ];
+        }
+
+        trajectory
+            .write(&frame)
+            .map_err(|e| format!("failed to write xtc frame {step}: {e}"))?;
+    }
+
+    trajectory
+        .flush()
+        .map_err(|e| format!("failed to flush xtc trajectory: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
