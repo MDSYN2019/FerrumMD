@@ -14,13 +14,9 @@ fn create_tip3p_water_box(
     n_side: usize,
     box_length: f64,
     temperature: f64,
-    mass: f64,
     n_particles: usize,
 ) -> Result<Vec<System>, String> {
     let spacing = box_length / n_side as f64; // spacing between molecules
-    let sigma_v = (temperature / mass).sqrt();
-    let normal = Normal::new(0.0, sigma_v)
-        .map_err(|e| format!("failed to build normal distribution: {e}"))?;
     let mut rng = rand::rng();
     // create storage vector to store the
     let mut systems = Vec::with_capacity(n_particles);
@@ -89,16 +85,16 @@ fn main() {
     let nsteps = 200;
     let thermostat_tau = 0.05;
 
-    //let mut particles =
-    //    create_martini_water_box(n_side, box_length, target_temperature, mass, sigma, epsilon)?;
-    //
-    //let simulation_box = SimulationBox {
-    //    x_dimension: box_length,
-    //    y_dimension: box_length,
-    //    z_dimension: box_length,
-    //};
-    //
-    //let mut subcells = simulation_box.create_subcells(10);
+    let mut particles = create_tip3p_water_box(n_side, box_length, target_temperature, 100);
+
+    // Create the simulation box
+    let simulation_box = SimulationBox {
+        x_dimension: box_length,
+        y_dimension: box_length,
+        z_dimension: box_length,
+    };
+
+    let mut subcells = simulation_box.create_subcells(10);
     //simulation_box.store_atoms_in_cells_particles(&mut particles, &mut subcells, 10);
     //compute_forces_particles(&mut particles, box_length, &mut subcells);
     //
