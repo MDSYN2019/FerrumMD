@@ -1,7 +1,7 @@
 use nalgebra::Vector3;
 use rand::Rng;
-use sang_md::lennard_jones_simulations::{self, InitOutput, Particle};
-use sang_md::molecule::io::write_gro;
+use sang_md::lennard_jones_simulations::{self, InitOutput};
+use sang_md::molecule::io::write_gro_systems;
 use sang_md::molecule::martini;
 use sang_md::molecule::molecule::System;
 
@@ -44,13 +44,6 @@ fn create_tip3p_water_box(n_side: usize, box_length: f64) -> Result<Vec<System>,
     Ok(systems)
 }
 
-fn flatten_systems_to_particles(systems: &[System]) -> Vec<Particle> {
-    systems
-        .iter()
-        .flat_map(|system| system.atoms.iter().cloned())
-        .collect()
-}
-
 fn main() -> Result<(), String> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -75,18 +68,18 @@ fn main() -> Result<(), String> {
         "berendsen",
     );
 
-    let particles = flatten_systems_to_particles(&systems);
-    write_gro(
+    write_gro_systems(
         "tip3p_water_box.gro",
-        &particles,
+        &systems,
         Vector3::new(box_length, box_length, box_length),
         "TIP3P water box",
     )?;
 
+    let atom_count: usize = systems.iter().map(|system| system.atoms.len()).sum();
     println!(
         "Wrote tip3p_water_box.gro for {} molecules ({} atoms)",
         systems.len(),
-        particles.len()
+        atom_count
     );
 
     Ok(())

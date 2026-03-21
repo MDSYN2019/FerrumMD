@@ -1,4 +1,5 @@
 use crate::lennard_jones_simulations::{LJParameters, Particle};
+use crate::molecule::molecule::System;
 use nalgebra::Vector3;
 use std::fs;
 use xdrfile::{Frame, Trajectory, XTCTrajectory};
@@ -184,6 +185,54 @@ pub fn write_gro(
             particle.position.y / 10.0,
             particle.position.z / 10.0,
         ));
+    }
+
+    output.push_str(&format!(
+        "{:>10.5}{:>10.5}{:>10.5}\n",
+        box_dims.x / 10.0,
+        box_dims.y / 10.0,
+        box_dims.z / 10.0,
+    ));
+
+    fs::write(path, output).map_err(|e| format!("failed to write gro file at '{path}': {e}"))
+}
+
+pub fn write_gro_systems(
+    path: &str,
+    systems: &[System],
+    box_dims: Vector3<f64>,
+    title: &str,
+) -> Result<(), String> {
+    let natoms: usize = systems.iter().map(|system| system.atoms.len()).sum();
+
+    let mut output = String::new();
+    output.push_str(title);
+    output.push('\n');
+    output.push_str(&format!("{:>5}\n", natoms));
+
+    let mut atom_serial = 1usize;
+    for (res_index, system) in systems.iter().enumerate() {
+        for (atom_idx, atom) in system.atoms.iter().enumerate() {
+            let atom_name = match atom_idx {
+                0 => "OW",
+                1 => "HW1",
+                2 => "HW2",
+                _ => "X",
+            };
+
+            output.push_str(&format!(
+                "{:>5}{:<5}{:>5}{:>5}{:>8.3}{:>8.3}{:>8.3}\n",
+                (res_index + 1) % 100_000,
+                "WAT",
+                atom_name,
+                atom_serial % 100_000,
+                atom.position.x / 10.0,
+                atom.position.y / 10.0,
+                atom.position.z / 10.0,
+            ));
+
+            atom_serial += 1;
+        }
     }
 
     output.push_str(&format!(
