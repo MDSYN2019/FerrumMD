@@ -495,7 +495,7 @@ pub mod lennard_jones_simulations {
         temp: f64,
         mass: f64,
         v_max: f64,
-        _box_dim_max: f64,
+        box_dim_max: f64,
         use_atom: bool,
     ) -> Result<InitOutput, String> {
         /*
@@ -507,6 +507,10 @@ pub mod lennard_jones_simulations {
         system for all the molecules
 
          */
+        if box_dim_max <= 0.0 {
+            return Err("box_dim_max must be > 0.0".to_string());
+        }
+
         let mut vector_positions: Vec<Particle> = Vec::new();
         let mut vector_system_positions: Vec<System> = Vec::new();
         let mut rng = rand::rng();
@@ -518,10 +522,10 @@ pub mod lennard_jones_simulations {
                 let mut particle = Particle {
                     // create position for the atom in question
                     position: Vector3::new(
-                        // generate x y z position values between -10 and 10
-                        rng.random_range(0.0..10.0), //TODO - need to add in box_length as a parameter
-                        rng.random_range(0.0..10.0), // ditto
-                        rng.random_range(0.0..10.0), // ditto
+                        // generate x y z position values using the configured box size
+                        rng.random_range(0.0..box_dim_max),
+                        rng.random_range(0.0..box_dim_max),
+                        rng.random_range(0.0..box_dim_max),
                     ),
 
                     // create velocity for atom in question
