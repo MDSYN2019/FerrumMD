@@ -29,6 +29,12 @@ fn create_tip3p_water_box(
 
     let mut tip3p_forcefield_itp_instance =
         martini::ItpForceField::read_itp("ff/Charmm27.ff/charmm27.ff/tip3p.itp")?;
+    let shared_atom_types = martini::ItpForceField::read_atomtypes_from_itp(
+        "ff/Charmm27.ff/charmm27.ff/ffnonbonded.itp",
+    )?;
+    tip3p_forcefield_itp_instance
+        .atom_types
+        .extend(shared_atom_types);
 
     // set up the initial oxygen and the h1/h2 positions
     let mut o = Vector3::new(0.0, 0.0, 0.0); // oxygen position

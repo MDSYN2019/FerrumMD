@@ -135,6 +135,49 @@ impl ItpForceField {
         Self::parse_str(&contents)
     }
 
+    pub fn read_atomtypes_from_itp(path: &str) -> Result<HashMap<String, ItpAtomType>, String> {
+        let contents = fs::read_to_string(path)
+            .map_err(|e| format!("failed to read itp file at '{path}': {e}"))?;
+        Self::parse_atomtypes_str(&contents)
+    }
+
+    pub fn parse_atomtypes_str(contents: &str) -> Result<HashMap<String, ItpAtomType>, String> {
+        let mut atom_types = HashMap::new();
+        let mut section = String::new();
+
+        for (line_number, raw_line) in contents.lines().enumerate() {
+            let line = raw_line.split(';').next().unwrap_or("").trim();
+
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            if line.starts_with('[') && line.ends_with(']') {
+                section = line[1..line.len() - 1].trim().to_ascii_lowercase();
+                continue;
+            }
+
+            if section != "atomtypes" {
+                continue;
+            }
+
+            let tokens: Vec<&str> = line.split_whitespace().collect();
+            if tokens.is_empty() {
+                continue;
+            }
+
+            let atom_type =
+                parse_atomtype(&tokens).map_err(|e| format!("line {}: {e}", line_number + 1))?;
+            atom_types.insert(atom_type.name.clone(), atom_type);
+        }
+
+        if atom_types.is_empty() {
+            return Err("itp input did not contain an [ atomtypes ] section".to_string());
+        }
+
+        Ok(atom_types)
+    }
+
     pub fn to_system(&self, coordinates: &[Vector3<f64>]) -> Result<System, String> {
         if coordinates.len() != self.atoms.len() {
             return Err(format!(
@@ -480,5 +523,20 @@ opls_001 6 12.011 0.0 A 0.355 0.276144
         let (sigma, epsilon) = infer_lj_parameters(atom_type).expect("lj inference should succeed");
         assert!((sigma - 0.355).abs() < 1e-12);
         assert!((epsilon - 0.276144).abs() < 1e-12);
+    }
+
+    #[test]
+    fn parses_atomtypes_only_itp() {
+        let itp = r#"
+[ atomtypes ]
+; name at.num mass charge ptype sigma epsilon
+OWT3 8 15.999400 -0.834 A 0.315058 0.636386
+"#;
+
+        let atom_types =
+            ItpForceField::parse_atomtypes_str(itp).expect("atomtypes parsing should succeed");
+        let atom_type = atom_types.get("OWT3").expect("OWT3 should exist");
+        assert!((atom_type.mass - 15.9994).abs() < 1e-12);
+        assert!((atom_type.charge + 0.834).abs() < 1e-12);
     }
 }
