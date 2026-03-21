@@ -9,10 +9,10 @@ pub struct ItpAtomType {
     pub name: String,
     pub mass: f64,
     pub charge: f64,
-    pub sigma: Option<f64>,
-    pub epsilon: Option<f64>,
-    pub c6: Option<f64>,
-    pub c12: Option<f64>,
+    pub sigma: Option<f64>,   // This is some or none
+    pub epsilon: Option<f64>, // This is some or none
+    pub c6: Option<f64>,      // This is some or none
+    pub c12: Option<f64>,     // This is some or none
 }
 
 #[derive(Clone, Debug)]
@@ -145,6 +145,7 @@ impl ItpForceField {
         }
 
         let mut particles = Vec::with_capacity(self.atoms.len());
+
         for (idx, atom) in self.atoms.iter().enumerate() {
             let atom_type = self
                 .atom_types
@@ -352,8 +353,9 @@ fn parse_dihedral(tokens: &[&str]) -> Result<ItpDihedral, String> {
 }
 
 fn infer_lj_parameters(atom_type: &ItpAtomType) -> Result<(f64, f64), String> {
+    // OK(T) -> An element T was found
     if let (Some(sigma), Some(epsilon)) = (atom_type.sigma, atom_type.epsilon) {
-        return Ok((sigma, epsilon));
+        return Ok((sigma, epsilon)); // sigma, epsilon was found and we are returning these
     }
 
     if let (Some(c6), Some(c12)) = (atom_type.c6, atom_type.c12) {

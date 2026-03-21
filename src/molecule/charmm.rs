@@ -109,6 +109,10 @@ enum ParamSection {
 }
 
 impl CharmmForceField {
+    //pub fn parse_file(path_to_charmm_dir: &str) -> String {
+    //    let charmm_contents = fs::read_to_string().expect("Should be able to read the charmm file");
+    //}
+
     pub fn parse_str(contents: &str) -> Result<Self, String> {
         let mut ff = CharmmForceField::default();
         let mut atom_index_by_name: HashMap<String, usize> = HashMap::new();
@@ -230,6 +234,14 @@ impl CharmmForceField {
     pub fn read_file(path: &str) -> Result<Self, String> {
         let contents = fs::read_to_string(path)
             .map_err(|e| format!("failed to read charmm file at '{path}': {e}"))?;
+        Self::parse_str(&contents)
+    }
+
+    pub fn read_file_new(path: &str) -> Result<Self, String> {
+        let contents = match fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(e) => return Err(e.to_string()),
+        };
         Self::parse_str(&contents)
     }
 
