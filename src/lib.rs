@@ -449,7 +449,11 @@ pub mod lennard_jones_simulations {
         total_energy
     }
 
-    pub fn set_molecular_positions_and_velocities(system_mol: &mut InitOutput, temp: f64) -> () {
+    pub fn set_molecular_positions_and_velocities(
+        system_mol: &mut InitOutput,
+        temp: f64,
+        box_length: f64,
+    ) -> () {
         let mut rng = rand::rng();
         // loop over each moleucle
 
@@ -469,9 +473,9 @@ pub mod lennard_jones_simulations {
                     // Randomize each molecule position as a rigid translation so cloned
                     // systems do not remain perfectly overlapped at initialization.
                     let translation = Vector3::new(
-                        rng.random_range(0.0..10.0),
-                        rng.random_range(0.0..10.0),
-                        rng.random_range(0.0..10.0),
+                        rng.random_range(0.0..box_length),
+                        rng.random_range(0.0..box_length),
+                        rng.random_range(0.0..box_length),
                     );
 
                     // Each element is a System
@@ -871,6 +875,25 @@ pub mod lennard_jones_simulations {
         apply_bonded_forces_and_energy(atoms, bonds, box_length)
     }
 
+    pub fn compute_all_bonded_forces_system(system: &mut System, box_length: f64) -> f64 {
+        for atom in system.atoms.iter_mut() {
+            atom.force = Vector3::zeros();
+        }
+        compute_bonded_forces(
+            &mut system.atoms,
+            &system.bonds,
+            &system.angles,
+            &system.dihedrals,
+            &system.impropers,
+            box_length,
+        )
+    }
+
+    pub fn compute_electrostatic_forces_systems(systems: &mut [System], box_length: f64) -> f64 {
+        let pme = PmeConfig::default();
+        add_electrostatic_forces_systems(systems, box_length, &pme)
+    }
+
     // -- temperature related computations
 
     pub fn kinetic_energy_particles(particles: &[Particle]) -> f64 {
@@ -881,11 +904,11 @@ pub mod lennard_jones_simulations {
     }
 
     pub fn compute_temperature_particles(particles: &[Particle], dof: usize) -> f64 {
-        // TODO - need to actually implement the boltzmann constant for computing the temperature
+        const KB_KJ_PER_MOL_K: f64 = 0.008_314_462_618_153_24;
         if dof == 0 {
             return 0.0;
         }
-        2.0 * kinetic_energy_particles(particles) / (dof as f64)
+        2.0 * kinetic_energy_particles(particles) / (KB_KJ_PER_MOL_K * dof as f64)
     }
 
     pub fn compute_temperature(state: &mut InitOutput, dof: usize) -> f64 {
@@ -913,7 +936,8 @@ pub mod lennard_jones_simulations {
             }
         };
 
-        2.0 * total_ke / (dof as f64)
+        const KB_KJ_PER_MOL_K: f64 = 0.008_314_462_618_153_24;
+        2.0 * total_ke / (KB_KJ_PER_MOL_K * dof as f64)
     }
 
     pub fn compute_pressure_particles(particles: &[Particle], box_length: f64) -> f64 {

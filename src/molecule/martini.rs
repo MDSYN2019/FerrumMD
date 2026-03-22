@@ -1,7 +1,7 @@
 use crate::lennard_jones_simulations::{LJParameters, Particle};
 use crate::molecule::molecule::{Angle, Bond, Dihedral, System};
 use nalgebra::Vector3;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
 #[derive(Clone, Debug, Default)]
@@ -65,13 +65,10 @@ impl ItpForceField {
     pub fn parse_str(contents: &str) -> Result<Self, String> {
         let mut ff = ItpForceField::default();
         let mut section = String::new();
+        let defines = default_preprocessor_defines();
 
-        for (line_number, raw_line) in contents.lines().enumerate() {
-            let line = raw_line.split(';').next().unwrap_or("").trim();
-
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
+        for (line_number, line) in preprocess_itp_lines(contents, &defines) {
+            let line = line.as_str();
 
             if line.starts_with('[') && line.ends_with(']') {
                 section = line[1..line.len() - 1].trim().to_ascii_lowercase();
@@ -144,13 +141,10 @@ impl ItpForceField {
     pub fn parse_atomtypes_str(contents: &str) -> Result<HashMap<String, ItpAtomType>, String> {
         let mut atom_types = HashMap::new();
         let mut section = String::new();
+        let defines = default_preprocessor_defines();
 
-        for (line_number, raw_line) in contents.lines().enumerate() {
-            let line = raw_line.split(';').next().unwrap_or("").trim();
-
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
+        for (line_number, line) in preprocess_itp_lines(contents, &defines) {
+            let line = line.as_str();
 
             if line.starts_with('[') && line.ends_with(']') {
                 section = line[1..line.len() - 1].trim().to_ascii_lowercase();
@@ -444,6 +438,83 @@ fn parse_usize(tokens: &[&str], index: usize, label: &str) -> Result<usize, Stri
         .ok_or_else(|| format!("missing {label}"))?
         .parse::<usize>()
         .map_err(|e| format!("failed to parse {label}: {e}"))
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ConditionalFrame {
+    parent_active: bool,
+    condition_active: bool,
+    in_else_branch: bool,
+}
+
+fn default_preprocessor_defines() -> HashSet<&'static str> {
+    HashSet::from(["_FF_CHARMM", "FLEXIBLE", "CHARMM_TIP3P"])
+}
+
+fn is_active(stack: &[ConditionalFrame]) -> bool {
+    stack.last().map_or(true, |frame| {
+        if frame.in_else_branch {
+            frame.parent_active && !frame.condition_active
+        } else {
+            frame.parent_active && frame.condition_active
+        }
+    })
+}
+
+fn preprocess_itp_lines(contents: &str, defines: &HashSet<&'static str>) -> Vec<(usize, String)> {
+    let mut filtered = Vec::new();
+    let mut condition_stack: Vec<ConditionalFrame> = Vec::new();
+
+    for (line_number, raw_line) in contents.lines().enumerate() {
+        let line = raw_line.split(';').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if let Some(symbol) = line.strip_prefix("#ifdef").map(str::trim) {
+            let frame = ConditionalFrame {
+                parent_active: is_active(&condition_stack),
+                condition_active: defines.contains(symbol),
+                in_else_branch: false,
+            };
+            condition_stack.push(frame);
+            continue;
+        }
+
+        if let Some(symbol) = line.strip_prefix("#ifndef").map(str::trim) {
+            let frame = ConditionalFrame {
+                parent_active: is_active(&condition_stack),
+                condition_active: !defines.contains(symbol),
+                in_else_branch: false,
+            };
+            condition_stack.push(frame);
+            continue;
+        }
+
+        if line.starts_with("#else") {
+            if let Some(last) = condition_stack.last_mut() {
+                last.in_else_branch = true;
+            }
+            continue;
+        }
+
+        if line.starts_with("#endif") {
+            let _ = condition_stack.pop();
+            continue;
+        }
+
+        if line.starts_with('#') {
+            continue;
+        }
+
+        if !is_active(&condition_stack) {
+            continue;
+        }
+
+        filtered.push((line_number, line.to_string()));
+    }
+
+    filtered
 }
 
 #[cfg(test)]
