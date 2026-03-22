@@ -90,7 +90,7 @@ fn main() -> Result<(), String> {
     let n_side = 6;
     let box_length = 18.0;
     let dt = 0.001;
-    let nsteps = 20;
+    let nsteps = 2000;
     let minimization_steps = 200;
     let minimization_step_size = 0.0005;
     let minimization_force_tolerance = 1e-3;
