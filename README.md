@@ -139,3 +139,90 @@ Generated files:
 - `martini_water_box.xtc`
 
 This is intended as a lightweight CG solvent demo that you can visualize in VMD with the same loading flow used for `water_box.xtc`.
+
+---
+
+## 🗺️ TIP3P roadmap to full simulation fidelity
+
+This project includes a TIP3P-oriented water-box path, and the following milestones track the remaining work needed to reach full, production-grade TIP3P simulation fidelity.
+
+### M1 — Rigid water support (highest priority)
+**Goal:** Ensure physically correct rigid water geometry and stable integration behavior.
+
+**Scope**
+- Parse and use `[ settles ]` water constraints from ITP.
+- Implement rigid-constraint enforcement (prefer SETTLE for 3-site water; optional SHAKE/RATTLE fallback).
+- Keep flexible and rigid water modes explicit in configuration.
+
+**Acceptance criteria**
+- O–H and H–H distances remain within tight tolerance during long runs.
+- Stable with larger practical time steps than unconstrained flexible mode.
+
+### M2 — Topology-correct nonbonded handling
+**Goal:** Correctly apply molecular exclusions and pair handling.
+
+**Scope**
+- Parse and store `[ exclusions ]` (and optionally `[ pairs ]`) topology sections.
+- Extend the system representation with exclusion/pair metadata.
+- Apply exclusion/pair logic in LJ and electrostatic kernels.
+
+**Acceptance criteria**
+- Unit tests confirm excluded pairs do not contribute to nonbonded terms.
+- Energy decomposition reflects intended topology behavior.
+
+### M3 — Units and electrostatics audit
+**Goal:** Make electrostatics and parameter units unambiguous and physically consistent.
+
+**Scope**
+- Replace reduced-unit shortcuts with explicit, documented unit-aware handling.
+- Document units for coordinates, charges, mass, timestep, and energy.
+- Add regression checks for analytic charge-pair and small water-cluster cases.
+
+**Acceptance criteria**
+- Pairwise reference checks pass.
+- No hidden or implicit unit conversion paths remain.
+
+### M4 — Integrator and ensemble hygiene
+**Goal:** Improve simulation protocol clarity and reproducibility.
+
+**Scope**
+- Clarify NVE/NVT naming and behavior in simulation entry points.
+- Add explicit equilibration vs production phases in TIP3P examples.
+- Remove hidden thermostat assumptions in core loops.
+
+**Acceptance criteria**
+- Reproducible runs with a fixed RNG seed option.
+- Clear runtime configuration for thermostat/barostat behavior.
+
+### M5 — Performance optimization for realistic box sizes
+**Goal:** Achieve practical throughput for larger water systems.
+
+**Scope**
+- Profile and optimize electrostatics (real + reciprocal) and neighbor updates.
+- Reduce avoidable temporary allocations and redundant data transforms.
+- Add benchmark cases for representative water-box sizes (e.g., 216/512/1024 waters).
+
+**Acceptance criteria**
+- Throughput metrics are documented and tracked.
+- TIP3P examples complete in practical wall-clock time at target sizes.
+
+### M6 — Scientific validation suite
+**Goal:** Validate output quality against expected TIP3P behavior.
+
+**Scope**
+- Add observables: density, O–O RDF, diffusion estimate, and NVE energy drift.
+- Compare against known TIP3P reference ranges under matching conditions.
+- Publish a validation report (markdown + plots).
+
+**Acceptance criteria**
+- Validation report is versioned in the repository.
+- CI smoke checks cover a reduced-size validation subset.
+
+### Suggested PR sequence
+1. ITP parser extensions (`settles`, `exclusions`, optional `pairs`) + data model updates.
+2. SETTLE/constraint implementation + focused tests.
+3. Exclusion/pair logic integrated into nonbonded calculations.
+4. Unit and electrostatics normalization with regression tests.
+5. TIP3P protocol cleanup (equilibration/production config).
+6. Performance tuning and benchmark documentation.
+7. Validation metrics/report integration.
