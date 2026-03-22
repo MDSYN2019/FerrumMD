@@ -146,7 +146,6 @@ fn dedup_permutation(v: &mut Vec<Vec<i32>>) {
 }
 
 pub mod cell_subdivision {
-    use crate::cell::cell::CellList;
     use crate::lennard_jones_simulations::Particle;
     use crate::molecule::molecule::System;
     use nalgebra::Vector3;
@@ -356,6 +355,129 @@ pub mod lennard_jones_simulations {
     #[derive(Clone)]
     pub struct SimulationSummary {
         pub energy: f64,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    pub struct SystemSimulationConfig {
+        pub cutoff: f64,
+        pub neighbor_skin: f64,
+        pub neighbor_rebuild_interval: usize,
+        pub pme: PmeConfig,
+    }
+
+    impl Default for SystemSimulationConfig {
+        fn default() -> Self {
+            Self {
+                cutoff: 9.0,
+                neighbor_skin: 1.5,
+                neighbor_rebuild_interval: 10,
+                pme: PmeConfig::default(),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug)]
+    struct SystemVerletNeighborList {
+        pairs: Vec<(usize, usize)>,
+        reference_positions: Vec<Vector3<f64>>,
+        cutoff: f64,
+        skin: f64,
+        rebuild_interval: usize,
+        steps_since_rebuild: usize,
+    }
+
+    impl SystemVerletNeighborList {
+        fn new(cutoff: f64, skin: f64, rebuild_interval: usize) -> Self {
+            Self {
+                pairs: Vec::new(),
+                reference_positions: Vec::new(),
+                cutoff,
+                skin,
+                rebuild_interval: rebuild_interval.max(1),
+                steps_since_rebuild: 0,
+            }
+        }
+
+        fn capture_positions(systems: &[System]) -> Vec<Vector3<f64>> {
+            systems
+                .iter()
+                .flat_map(|sys| sys.atoms.iter().map(|a| a.position))
+                .collect()
+        }
+
+        fn atom_count(systems: &[System]) -> usize {
+            systems.iter().map(|sys| sys.atoms.len()).sum()
+        }
+
+        fn max_displacement_since_rebuild(&self, systems: &[System], box_length: f64) -> f64 {
+            if self.reference_positions.is_empty() {
+                return f64::INFINITY;
+            }
+
+            let mut max_disp: f64 = 0.0;
+            let mut idx = 0usize;
+            for sys in systems.iter() {
+                for atom in sys.atoms.iter() {
+                    if idx >= self.reference_positions.len() {
+                        return f64::INFINITY;
+                    }
+                    let dr = minimum_image_convention(
+                        atom.position - self.reference_positions[idx],
+                        box_length,
+                    );
+                    max_disp = max_disp.max(dr.norm());
+                    idx += 1;
+                }
+            }
+
+            max_disp
+        }
+
+        fn rebuild_if_needed(&mut self, systems: &[System], box_length: f64) {
+            let atom_count = Self::atom_count(systems);
+            let needs_size_rebuild = self.reference_positions.len() != atom_count;
+            let max_disp = self.max_displacement_since_rebuild(systems, box_length);
+            let needs_skin_rebuild = max_disp >= 0.5 * self.skin;
+            let needs_interval_rebuild = self.steps_since_rebuild >= self.rebuild_interval;
+
+            if needs_size_rebuild || needs_skin_rebuild || needs_interval_rebuild {
+                self.rebuild_pairs(systems, box_length);
+            } else {
+                self.steps_since_rebuild += 1;
+            }
+        }
+
+        fn rebuild_pairs(&mut self, systems: &[System], box_length: f64) {
+            self.pairs.clear();
+            self.reference_positions = Self::capture_positions(systems);
+            self.steps_since_rebuild = 0;
+
+            let mut atom_map: Vec<(usize, usize)> =
+                Vec::with_capacity(self.reference_positions.len());
+            for (sys_idx, sys) in systems.iter().enumerate() {
+                for atom_idx in 0..sys.atoms.len() {
+                    atom_map.push((sys_idx, atom_idx));
+                }
+            }
+
+            let neighbor_cutoff = self.cutoff + self.skin;
+            let neighbor_cutoff2 = neighbor_cutoff * neighbor_cutoff;
+
+            for i in 0..atom_map.len() {
+                for j in (i + 1)..atom_map.len() {
+                    if atom_map[i].0 == atom_map[j].0 {
+                        continue; // omit intramolecular pairs
+                    }
+
+                    let ri = self.reference_positions[i];
+                    let rj = self.reference_positions[j];
+                    let rij = minimum_image_convention(rj - ri, box_length);
+                    if rij.norm_squared() <= neighbor_cutoff2 {
+                        self.pairs.push((i, j));
+                    }
+                }
+            }
+        }
     }
 
     pub enum InitOutput {
@@ -790,12 +912,96 @@ pub mod lennard_jones_simulations {
         )
     }
 
+    fn flatten_system_atom_map(systems: &[System]) -> Vec<(usize, usize)> {
+        let mut atom_map = Vec::new();
+        for (sys_idx, sys) in systems.iter().enumerate() {
+            for atom_idx in 0..sys.atoms.len() {
+                atom_map.push((sys_idx, atom_idx));
+            }
+        }
+        atom_map
+    }
+
+    fn compute_intermolecular_forces_systems_with_pairs(
+        systems: &mut [System],
+        box_length: f64,
+        pairs: &[(usize, usize)],
+        cutoff: f64,
+    ) -> f64 {
+        let mut total_energy = 0.0;
+        let atom_map = flatten_system_atom_map(systems);
+        let cutoff2 = cutoff * cutoff;
+
+        for &(global_i, global_j) in pairs.iter() {
+            let (sys_i_idx_raw, atom_i_idx_raw) = atom_map[global_i];
+            let (sys_j_idx_raw, atom_j_idx_raw) = atom_map[global_j];
+            if sys_i_idx_raw == sys_j_idx_raw {
+                continue;
+            }
+
+            let (sys_i_idx, atom_i_idx, sys_j_idx, atom_j_idx, swap_sign) =
+                if sys_i_idx_raw < sys_j_idx_raw {
+                    (
+                        sys_i_idx_raw,
+                        atom_i_idx_raw,
+                        sys_j_idx_raw,
+                        atom_j_idx_raw,
+                        1.0,
+                    )
+                } else {
+                    (
+                        sys_j_idx_raw,
+                        atom_j_idx_raw,
+                        sys_i_idx_raw,
+                        atom_i_idx_raw,
+                        -1.0,
+                    )
+                };
+
+            let (left, right) = systems.split_at_mut(sys_j_idx);
+            let sys_i = &mut left[sys_i_idx];
+            let sys_j = &mut right[0];
+            let atom_i = &mut sys_i.atoms[atom_i_idx];
+            let atom_j = &mut sys_j.atoms[atom_j_idx];
+
+            let r_vec = atom_j.position - atom_i.position;
+            let r_mic = minimum_image_convention(r_vec, box_length);
+            let r2 = r_mic.norm_squared();
+            if r2 <= 1e-24 || r2 > cutoff2 {
+                continue;
+            }
+            let r = safe_norm(r2.sqrt());
+
+            let sigma = 0.5 * (atom_i.lj_parameters.sigma + atom_j.lj_parameters.sigma);
+            let epsilon = (atom_i.lj_parameters.epsilon * atom_j.lj_parameters.epsilon).sqrt();
+
+            let f_mag = lennard_jones_force_scalar(r, sigma, epsilon);
+            let f_vec = (r_mic / r) * f_mag * swap_sign;
+
+            atom_i.force -= f_vec;
+            atom_j.force += f_vec;
+
+            total_energy += lennard_jones_potential(r, sigma, epsilon);
+        }
+
+        total_energy
+    }
+
     pub fn compute_intermolecular_forces_systems(systems: &mut [System], box_length: f64) -> f64 {
+        compute_intermolecular_forces_systems_cutoff(systems, box_length, 9.0)
+    }
+
+    pub fn compute_intermolecular_forces_systems_cutoff(
+        systems: &mut [System],
+        box_length: f64,
+        cutoff: f64,
+    ) -> f64 {
         /*
         Compute Lennard-Jones interactions between atoms belonging to different systems.
         Intra-molecular interactions are omitted here and handled by bonded terms.
          */
         let mut total_energy = 0.0;
+        let cutoff2 = cutoff * cutoff;
 
         for i in 0..systems.len() {
             for j in (i + 1)..systems.len() {
@@ -807,7 +1013,11 @@ pub mod lennard_jones_simulations {
                     for atom_j in sys_j.atoms.iter_mut() {
                         let r_vec = atom_j.position - atom_i.position;
                         let r_mic = minimum_image_convention(r_vec, box_length);
-                        let r = safe_norm(r_mic.norm());
+                        let r2 = r_mic.norm_squared();
+                        if r2 > cutoff2 {
+                            continue;
+                        }
+                        let r = safe_norm(r2.sqrt());
 
                         let sigma = 0.5 * (atom_i.lj_parameters.sigma + atom_j.lj_parameters.sigma);
                         let epsilon =
@@ -829,10 +1039,19 @@ pub mod lennard_jones_simulations {
     }
 
     pub fn intermolecular_site_site_energy_systems(systems: &[System], box_length: f64) -> f64 {
+        intermolecular_site_site_energy_systems_cutoff(systems, box_length, 9.0)
+    }
+
+    pub fn intermolecular_site_site_energy_systems_cutoff(
+        systems: &[System],
+        box_length: f64,
+        cutoff: f64,
+    ) -> f64 {
         /*
         Compute Lennard-Jones potential energy between atoms in different systems.
          */
         let mut total_energy = 0.0;
+        let cutoff2 = cutoff * cutoff;
 
         for i in 0..systems.len() {
             for j in (i + 1)..systems.len() {
@@ -843,7 +1062,11 @@ pub mod lennard_jones_simulations {
                     for atom_j in sys_j.atoms.iter() {
                         let r_vec = atom_j.position - atom_i.position;
                         let r_mic = minimum_image_convention(r_vec, box_length);
-                        let r = safe_norm(r_mic.norm());
+                        let r2 = r_mic.norm_squared();
+                        if r2 > cutoff2 {
+                            continue;
+                        }
+                        let r = safe_norm(r2.sqrt());
 
                         let sigma = 0.5 * (atom_i.lj_parameters.sigma + atom_j.lj_parameters.sigma);
                         let epsilon =
@@ -892,6 +1115,14 @@ pub mod lennard_jones_simulations {
     pub fn compute_electrostatic_forces_systems(systems: &mut [System], box_length: f64) -> f64 {
         let pme = PmeConfig::default();
         add_electrostatic_forces_systems(systems, box_length, &pme)
+    }
+
+    pub fn compute_electrostatic_forces_systems_with_config(
+        systems: &mut [System],
+        box_length: f64,
+        pme: &PmeConfig,
+    ) -> f64 {
+        add_electrostatic_forces_systems(systems, box_length, pme)
     }
 
     // -- temperature related computations
@@ -1920,22 +2151,33 @@ pub mod lennard_jones_simulations {
         box_length: f64,
         thermostat: &str,
     ) {
+        run_md_nve_systems_with_config(
+            systems,
+            number_of_steps,
+            dt,
+            box_length,
+            thermostat,
+            SystemSimulationConfig::default(),
+        );
+    }
+
+    pub fn run_md_nve_systems_with_config(
+        systems: &mut Vec<System>,
+        number_of_steps: i32,
+        dt: f64,
+        box_length: f64,
+        thermostat: &str,
+        config: SystemSimulationConfig,
+    ) {
         let mut values: Vec<f32> = Vec::new();
         let mut total_energy = 0.0;
         let mut kinetic_energy = 0.0;
         let mut potential_energy = 0.0;
-        let pme = PmeConfig::default();
-
-        // Create the subcells for the simulation box
-        let simulation_box = cell_subdivision::SimulationBox {
-            x_dimension: box_length,
-            y_dimension: box_length,
-            z_dimension: box_length,
-        };
-        // Create the subcells - here we have used a subdivision of 10 for the cells
-        let mut subcells = simulation_box.create_subcells(10);
-        // Store the coordinates in cells
-        simulation_box.store_atoms_in_cells_systems(systems, &mut subcells, 10);
+        let mut nlist = SystemVerletNeighborList::new(
+            config.cutoff,
+            config.neighbor_skin,
+            config.neighbor_rebuild_interval,
+        );
         // --- initial forces and energy ---
 
         info!(
@@ -1955,8 +2197,14 @@ pub mod lennard_jones_simulations {
                 box_length,
             );
         }
-        compute_intermolecular_forces_systems(systems, box_length);
-        let _ = add_electrostatic_forces_systems(systems, box_length, &pme);
+        nlist.rebuild_pairs(systems, box_length);
+        compute_intermolecular_forces_systems_with_pairs(
+            systems,
+            box_length,
+            &nlist.pairs,
+            config.cutoff,
+        );
+        let _ = add_electrostatic_forces_systems(systems, box_length, &config.pme);
 
         // this is only used if we apply nose hoover
         let mut xi_nose_hoover = vec![0.0; systems.len()];
@@ -1993,8 +2241,15 @@ pub mod lennard_jones_simulations {
                 );
             }
 
-            compute_intermolecular_forces_systems(systems, box_length);
-            let electrostatic_energy = add_electrostatic_forces_systems(systems, box_length, &pme);
+            nlist.rebuild_if_needed(systems, box_length);
+            compute_intermolecular_forces_systems_with_pairs(
+                systems,
+                box_length,
+                &nlist.pairs,
+                config.cutoff,
+            );
+            let electrostatic_energy =
+                add_electrostatic_forces_systems(systems, box_length, &config.pme);
 
             for (s, sys) in systems.iter_mut().enumerate() {
                 for a in sys.atoms.iter_mut() {
@@ -2032,7 +2287,8 @@ pub mod lennard_jones_simulations {
                     box_length,
                 );
             }
-            potential_energy += intermolecular_site_site_energy_systems(systems, box_length);
+            potential_energy +=
+                intermolecular_site_site_energy_systems_cutoff(systems, box_length, config.cutoff);
             potential_energy += electrostatic_energy;
 
             total_energy = kinetic_energy + potential_energy;
@@ -2069,7 +2325,14 @@ pub mod lennard_jones_simulations {
                 if thermostat == "monte_carlo" {
                     return;
                 }
-                run_md_nve_particles(particles, number_of_steps, dt, box_length, thermostat, 30.0);
+                run_md_nve_particles(
+                    particles,
+                    number_of_steps,
+                    dt,
+                    box_length,
+                    thermostat,
+                    cutoff,
+                );
             }
             InitOutput::Systems(systems) => {
                 run_md_nve_systems(systems, number_of_steps, dt, box_length, thermostat);

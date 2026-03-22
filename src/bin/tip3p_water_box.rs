@@ -1,9 +1,51 @@
 use nalgebra::Vector3;
 use rand::Rng;
-use sang_md::lennard_jones_simulations::{self, InitOutput};
+use sang_md::lennard_jones_simulations::{self, InitOutput, SystemSimulationConfig};
 use sang_md::molecule::io::write_gro_systems;
 use sang_md::molecule::martini;
 use sang_md::molecule::molecule::System;
+use sang_md::PmeConfig;
+
+#[derive(Clone, Copy, Debug)]
+enum WaterRepresentation {
+    Tip3pAtomistic,
+}
+
+fn validate_tip3p_nonbonded_model(
+    systems: &[System],
+    representation: WaterRepresentation,
+) -> Result<(), String> {
+    match representation {
+        WaterRepresentation::Tip3pAtomistic => {
+            for (system_index, system) in systems.iter().enumerate() {
+                for atom in system.atoms.iter() {
+                    if atom.mass <= 0.0 {
+                        return Err(format!(
+                            "system {system_index} atom {} has non-positive mass",
+                            atom.id
+                        ));
+                    }
+                    if atom.charge.abs() < 1e-12 {
+                        return Err(format!(
+                            "system {system_index} atom {} has zero charge; TIP3P requires partial charges on all sites",
+                            atom.id
+                        ));
+                    }
+
+                    let sigma = atom.lj_parameters.sigma;
+                    let epsilon = atom.lj_parameters.epsilon;
+                    if sigma < 0.0 || epsilon < 0.0 {
+                        return Err(format!(
+                            "system {system_index} atom {} has negative LJ parameters (sigma={sigma}, epsilon={epsilon})",
+                            atom.id
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
 
 fn create_tip3p_water_box(n_side: usize, box_length: f64) -> Result<Vec<System>, String> {
     let spacing = box_length / n_side as f64;
@@ -96,6 +138,8 @@ fn main() -> Result<(), String> {
     let minimization_force_tolerance = 1e-3;
 
     let mut systems = create_tip3p_water_box(n_side, box_length)?;
+    let water_model = WaterRepresentation::Tip3pAtomistic;
+    validate_tip3p_nonbonded_model(&systems, water_model)?;
     minimize_systems(
         &mut systems,
         box_length,
@@ -114,12 +158,24 @@ fn main() -> Result<(), String> {
         systems = randomized;
     }
 
-    lennard_jones_simulations::run_md_nve_systems(
+    let config = SystemSimulationConfig {
+        cutoff: 9.0,
+        neighbor_skin: 1.0,
+        neighbor_rebuild_interval: 8,
+        pme: PmeConfig {
+            alpha: 0.35,
+            real_cutoff: 9.0,
+            kmax: 6,
+        },
+    };
+
+    lennard_jones_simulations::run_md_nve_systems_with_config(
         &mut systems,
         nsteps,
         dt,
         box_length,
         "berendsen",
+        config,
     );
 
     write_gro_systems(
