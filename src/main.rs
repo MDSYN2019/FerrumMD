@@ -151,7 +151,11 @@ fn main() {
     // now including electrostatics via the Ewald split in the MD engine.
     let h2 = molecule::make_h2_system();
     let mut systems_vec = molecule::create_systems(&h2, 12);
-    lennard_jones_simulations::set_molecular_positions_and_velocities(&mut systems_vec, 300.0);
+    lennard_jones_simulations::set_molecular_positions_and_velocities(
+        &mut systems_vec,
+        300.0,
+        10.0,
+    );
 
     #[cfg(feature = "mpi")]
     {

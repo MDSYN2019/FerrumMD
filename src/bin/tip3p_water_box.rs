@@ -20,8 +20,8 @@ fn create_tip3p_water_box(n_side: usize, box_length: f64) -> Result<Vec<System>,
         .extend(shared_atom_types);
 
     let o = Vector3::new(0.0, 0.0, 0.0);
-    let h1 = Vector3::new(0.9572, 0.0, 0.0);
-    let h2 = Vector3::new(-0.23999, 0.92663, 0.0);
+    let h1 = Vector3::new(0.09572, 0.0, 0.0);
+    let h2 = Vector3::new(-0.023999, 0.092663, 0.0);
 
     for ix in 0..n_side {
         for iy in 0..n_side {
@@ -53,13 +53,11 @@ fn minimize_systems(
 ) {
     for step in 0..max_steps {
         for sys in systems.iter_mut() {
-            lennard_jones_simulations::compute_bonded_forces_system(
-                &mut sys.atoms,
-                &sys.bonds,
-                box_length,
-            );
+            lennard_jones_simulations::compute_all_bonded_forces_system(sys, box_length);
         }
         lennard_jones_simulations::compute_intermolecular_forces_systems(systems, box_length);
+        let _ =
+            lennard_jones_simulations::compute_electrostatic_forces_systems(systems, box_length);
 
         let mut max_force = 0.0;
         for sys in systems.iter_mut() {
@@ -107,7 +105,11 @@ fn main() -> Result<(), String> {
     );
 
     let mut init_state = InitOutput::Systems(systems.clone());
-    lennard_jones_simulations::set_molecular_positions_and_velocities(&mut init_state, 300.0);
+    lennard_jones_simulations::set_molecular_positions_and_velocities(
+        &mut init_state,
+        300.0,
+        box_length,
+    );
     if let InitOutput::Systems(randomized) = init_state {
         systems = randomized;
     }
