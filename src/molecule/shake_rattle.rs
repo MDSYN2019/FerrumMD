@@ -1,5 +1,11 @@
+/*
+SHAKE: fixes positions so constraints like bond lengths are satisfied
+
+RATTLE: does SHAKE plus an extra correction for velocities
+
+*/
+
 pub mod shake_rattle {
-    use crate::lennard_jones_simulations::Particle;
     use crate::molecule::molecule::System;
 
     fn rattle(
@@ -63,5 +69,41 @@ pub mod shake_rattle {
         }
     }
 
-    fn shake(tolerance: f64) -> () {}
+    fn shake(
+        tolerance: f64,
+        system: &mut System,
+        index_i: usize,
+        index_j: usize,
+        target_distance: f64,
+        max_iter: usize,
+    ) -> () {
+        // Compute the unconstrained trial positions
+        // Enforce position constraints
+        // Accept corrected positions
+
+        // TODO -> need to add more documenatation on how shake works
+        let inv_mi = 1.0 / system.atoms[index_i].mass;
+        let inv_mj = 1.0 / system.atoms[index_j].mass;
+
+        for _ in 0..max_iter {
+            let r_vec = system.atoms[index_j].position - system.atoms[index_i].position; // get v
+            let dist_sq = r_vec.dot(&r_vec); // get the distance squared
+            let constraint_error = dist_sq - target_distance.powi(2);
+
+            if constraint_error.abs() < tolerance {
+                break;
+            }
+            let denominator = 2.0 * (inv_mi + inv_mj) * dist_sq;
+
+            if denominator.abs() < 1e-12 {
+                panic!("Denominator too small in shake");
+            }
+
+            let lambda_ij = -constraint_error / denominator;
+            let correction = lambda_ij * r_vec;
+
+            system.atoms[index_i].position += correction * inv_mi;
+            system.atoms[index_j].position += correction * inv_mj;
+        }
+    }
 }
