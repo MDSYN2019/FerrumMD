@@ -97,6 +97,8 @@ fn main() -> Result<(), String> {
     let minimization_force_tolerance = 1e-3;
 
     let mut systems = create_tip3p_water_box(n_side, box_length)?;
+    let water_model = WaterRepresentation::Tip3pAtomistic;
+    validate_tip3p_nonbonded_model(&systems, water_model)?;
     minimize_systems(
         &mut systems,
         box_length,
@@ -125,14 +127,7 @@ fn main() -> Result<(), String> {
         max_iter: 100,
     };
 
-    lennard_jones_simulations::run_md_nve_systems_with_constraints(
-        &mut systems,
-        nsteps,
-        dt,
-        box_length,
-        "berendsen",
-        Some(&constraint_options),
-    );
+    lennard_jones_simulations::run_md_nve_systems_with_constraints(Some(&constraint_options));
 
     write_gro_systems(
         "tip3p_water_box.gro",
