@@ -10,16 +10,53 @@ pub mod shake_rattle {
 
     use crate::molecule::molecule::System;
 
-    pub fn tip3p_constraints_from_system(system: &System) -> Result<Vec<(usize, usize, f64)>, String> {
+    #[derive(Clone, Debug)]
+    pub struct DistanceConstraint {
+        pub index_i: usize,
+        pub index_j: usize,
+        pub target_distance: f64,
+    }
+
+    pub fn constraints_from_bonds(system: &System) -> Vec<DistanceConstraint> {
+        system
+            .bonds
+            .iter()
+            .map(|bond| DistanceConstraint {
+                index_i: bond.atom1,
+                index_j: bond.atom2,
+                target_distance: bond.r0,
+            })
+            .collect()
+    }
+
+    pub fn constraints_from_pairs(
+        system: &System,
+        pairs: &[(usize, usize)],
+    ) -> Result<Vec<DistanceConstraint>, String> {
+        let mut constraints = Vec::with_capacity(pairs.len());
+        for &(i, j) in pairs {
+            if i >= system.atoms.len() || j >= system.atoms.len() {
+                return Err(format!(
+                    "Constraint pair ({i}, {j}) is out of bounds for {} atoms.",
+                    system.atoms.len()
+                ));
+            }
+            constraints.push(DistanceConstraint {
+                index_i: i,
+                index_j: j,
+                target_distance: (system.atoms[j].position - system.atoms[i].position).norm(),
+            });
+        }
+        Ok(constraints)
+    }
+
+    pub fn tip3p_constraints_from_system(
+        system: &System,
+    ) -> Result<Vec<DistanceConstraint>, String> {
         if system.atoms.len() != 3 {
             return Err("TIP3P constraint builder expects exactly 3 atoms per molecule.".to_string());
         }
-
-        let oh1 = (system.atoms[1].position - system.atoms[0].position).norm();
-        let oh2 = (system.atoms[2].position - system.atoms[0].position).norm();
-        let hh = (system.atoms[2].position - system.atoms[1].position).norm();
-
-        Ok(vec![(0, 1, oh1), (0, 2, oh2), (1, 2, hh)])
+        constraints_from_pairs(system, &[(0, 1), (0, 2), (1, 2)])
     }
 
     fn shake_bond(
@@ -97,13 +134,16 @@ pub mod shake_rattle {
 
     pub fn apply_shake(
         system: &mut System,
-        constraints: &[(usize, usize, f64)],
+        constraints: &[DistanceConstraint],
         tolerance: f64,
         max_iter: usize,
     ) {
         for _ in 0..max_iter {
             let mut converged = true;
-            for &(i, j, d_ij) in constraints {
+            for constraint in constraints {
+                let i = constraint.index_i;
+                let j = constraint.index_j;
+                let d_ij = constraint.target_distance;
                 let r_vec = system.atoms[j].position - system.atoms[i].position;
                 let error = r_vec.dot(&r_vec) - d_ij.powi(2);
                 if error.abs() >= tolerance {
@@ -119,13 +159,15 @@ pub mod shake_rattle {
 
     pub fn apply_rattle(
         system: &mut System,
-        constraints: &[(usize, usize, f64)],
+        constraints: &[DistanceConstraint],
         tolerance: f64,
         max_iter: usize,
     ) {
         for _ in 0..max_iter {
             let mut converged = true;
-            for &(i, j, _d_ij) in constraints {
+            for constraint in constraints {
+                let i = constraint.index_i;
+                let j = constraint.index_j;
                 let r_vec = system.atoms[j].position - system.atoms[i].position;
                 let v_vec = system.atoms[j].velocity - system.atoms[i].velocity;
                 if r_vec.dot(&v_vec).abs() >= tolerance {

@@ -1,9 +1,10 @@
 use nalgebra::Vector3;
 use rand::Rng;
-use sang_md::lennard_jones_simulations::{self, InitOutput};
+use sang_md::lennard_jones_simulations::{self, ConstraintOptions, InitOutput};
 use sang_md::molecule::io::write_gro_systems;
 use sang_md::molecule::martini;
 use sang_md::molecule::molecule::System;
+use sang_md::molecule::shake_rattle::shake_rattle;
 
 fn create_tip3p_water_box(n_side: usize, box_length: f64) -> Result<Vec<System>, String> {
     let spacing = box_length / n_side as f64;
@@ -114,12 +115,23 @@ fn main() -> Result<(), String> {
         systems = randomized;
     }
 
-    lennard_jones_simulations::run_md_nve_systems(
+    let constraints_by_system: Result<Vec<_>, _> = systems
+        .iter()
+        .map(shake_rattle::tip3p_constraints_from_system)
+        .collect();
+    let constraint_options = ConstraintOptions {
+        constraints_by_system: constraints_by_system?,
+        tolerance: 1e-10,
+        max_iter: 100,
+    };
+
+    lennard_jones_simulations::run_md_nve_systems_with_constraints(
         &mut systems,
         nsteps,
         dt,
         box_length,
         "berendsen",
+        Some(&constraint_options),
     );
 
     write_gro_systems(
