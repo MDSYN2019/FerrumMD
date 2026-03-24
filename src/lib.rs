@@ -325,6 +325,7 @@ pub mod lennard_jones_simulations {
     use crate::molecule::molecule::make_h2_system;
     use crate::molecule::molecule::Bond;
     use crate::molecule::molecule::System;
+    use crate::molecule::shake_rattle::shake_rattle;
     use crate::molecule::molecule::{
         apply_all_bonded_forces_and_energy, apply_bonded_forces_and_energy, Angle, Dihedral,
         Improper,
@@ -1928,6 +1929,12 @@ pub mod lennard_jones_simulations {
         let mut kinetic_energy = 0.0;
         let mut potential_energy = 0.0;
         let pme = PmeConfig::default();
+        let shake_tolerance = 1e-10;
+        let shake_max_iter = 100;
+        let tip3p_constraint_sets: Vec<Option<Vec<(usize, usize, f64)>>> = systems
+            .iter()
+            .map(|system| shake_rattle::tip3p_constraints_from_system(system).ok())
+            .collect();
 
         // Create the subcells for the simulation box
         let simulation_box = cell_subdivision::SimulationBox {
@@ -1966,7 +1973,7 @@ pub mod lennard_jones_simulations {
 
         // --- time integration loop ---
         for _step in 0..number_of_steps {
-            for sys in systems.iter_mut() {
+            for (s, sys) in systems.iter_mut().enumerate() {
                 let mut a_old: Vec<Vector3<f64>> = Vec::with_capacity(sys.atoms.len());
 
                 for a in sys.atoms.iter() {
@@ -1982,6 +1989,9 @@ pub mod lennard_jones_simulations {
                 }
 
                 pbc_update(&mut sys.atoms, box_length);
+                if let Some(constraints) = &tip3p_constraint_sets[s] {
+                    shake_rattle::apply_shake(sys, constraints, shake_tolerance, shake_max_iter);
+                }
 
                 for a in sys.atoms.iter_mut() {
                     a.force = Vector3::zeros();
@@ -2003,6 +2013,9 @@ pub mod lennard_jones_simulations {
                 for a in sys.atoms.iter_mut() {
                     let a_new = a.force / a.mass;
                     a.update_velocity_verlet(a_new, dt);
+                }
+                if let Some(constraints) = &tip3p_constraint_sets[s] {
+                    shake_rattle::apply_rattle(sys, constraints, shake_tolerance, shake_max_iter);
                 }
 
                 let dof = 3 * sys.atoms.len();
