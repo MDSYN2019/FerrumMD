@@ -1,51 +1,10 @@
 use nalgebra::Vector3;
 use rand::Rng;
-use sang_md::lennard_jones_simulations::{self, InitOutput, SystemSimulationConfig};
+use sang_md::lennard_jones_simulations::{self, ConstraintOptions, InitOutput};
 use sang_md::molecule::io::write_gro_systems;
 use sang_md::molecule::martini;
 use sang_md::molecule::molecule::System;
-use sang_md::PmeConfig;
-
-#[derive(Clone, Copy, Debug)]
-enum WaterRepresentation {
-    Tip3pAtomistic,
-}
-
-fn validate_tip3p_nonbonded_model(
-    systems: &[System],
-    representation: WaterRepresentation,
-) -> Result<(), String> {
-    match representation {
-        WaterRepresentation::Tip3pAtomistic => {
-            for (system_index, system) in systems.iter().enumerate() {
-                for atom in system.atoms.iter() {
-                    if atom.mass <= 0.0 {
-                        return Err(format!(
-                            "system {system_index} atom {} has non-positive mass",
-                            atom.id
-                        ));
-                    }
-                    if atom.charge.abs() < 1e-12 {
-                        return Err(format!(
-                            "system {system_index} atom {} has zero charge; TIP3P requires partial charges on all sites",
-                            atom.id
-                        ));
-                    }
-
-                    let sigma = atom.lj_parameters.sigma;
-                    let epsilon = atom.lj_parameters.epsilon;
-                    if sigma < 0.0 || epsilon < 0.0 {
-                        return Err(format!(
-                            "system {system_index} atom {} has negative LJ parameters (sigma={sigma}, epsilon={epsilon})",
-                            atom.id
-                        ));
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
+use sang_md::molecule::shake_rattle::shake_rattle;
 
 fn create_tip3p_water_box(n_side: usize, box_length: f64) -> Result<Vec<System>, String> {
     let spacing = box_length / n_side as f64;
@@ -132,7 +91,7 @@ fn main() -> Result<(), String> {
     let n_side = 6;
     let box_length = 18.0;
     let dt = 0.001;
-    let nsteps = 20;
+    let nsteps = 2000;
     let minimization_steps = 200;
     let minimization_step_size = 0.0005;
     let minimization_force_tolerance = 1e-3;
@@ -158,25 +117,17 @@ fn main() -> Result<(), String> {
         systems = randomized;
     }
 
-    let config = SystemSimulationConfig {
-        cutoff: 9.0,
-        neighbor_skin: 1.0,
-        neighbor_rebuild_interval: 8,
-        pme: PmeConfig {
-            alpha: 0.35,
-            real_cutoff: 9.0,
-            kmax: 6,
-        },
+    let constraints_by_system: Result<Vec<_>, _> = systems
+        .iter()
+        .map(shake_rattle::tip3p_constraints_from_system)
+        .collect();
+    let constraint_options = ConstraintOptions {
+        constraints_by_system: constraints_by_system?,
+        tolerance: 1e-10,
+        max_iter: 100,
     };
 
-    lennard_jones_simulations::run_md_nve_systems_with_config(
-        &mut systems,
-        nsteps,
-        dt,
-        box_length,
-        "berendsen",
-        config,
-    );
+    lennard_jones_simulations::run_md_nve_systems_with_constraints(Some(&constraint_options));
 
     write_gro_systems(
         "tip3p_water_box.gro",

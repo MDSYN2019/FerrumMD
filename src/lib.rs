@@ -328,6 +328,7 @@ pub mod lennard_jones_simulations {
         apply_all_bonded_forces_and_energy, apply_bonded_forces_and_energy, Angle, Dihedral,
         Improper,
     };
+    use crate::molecule::shake_rattle::shake_rattle::{self, DistanceConstraint};
 
     use crate::lennard_jones_simulations::cell_subdivision::MolecularCoordinates;
 
@@ -488,6 +489,13 @@ pub mod lennard_jones_simulations {
     pub enum InitMode {
         Atoms,
         Molecules,
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct ConstraintOptions {
+        pub constraints_by_system: Vec<Vec<DistanceConstraint>>,
+        pub tolerance: f64,
+        pub max_iter: usize,
     }
 
     impl Particle {
@@ -1753,6 +1761,7 @@ pub mod lennard_jones_simulations {
                 a_old.push(a.force / a.mass);
             }
 
+            // --- half-step update for velocity and position ---
             // 1) velocity update (Verlet - half step)
             for (atom, a_o) in particles.iter_mut().zip(a_old.iter()) {
                 atom.velocity += 0.5 * a_o * dt;
@@ -1761,8 +1770,10 @@ pub mod lennard_jones_simulations {
             // 2) position update - needs to use the velocity that has been
             // updated using the half step method
             for atom in particles.iter_mut() {
-                atom.update_position_verlet(dt);
+                atom.update_position_verlet(dt); // the velocity has already been updated by a half step, so this will update the position by the half step
             }
+
+            // ----
 
             // 3) PBC
             pbc_update(particles, box_length);
@@ -2151,23 +2162,23 @@ pub mod lennard_jones_simulations {
         box_length: f64,
         thermostat: &str,
     ) {
-        run_md_nve_systems_with_config(
+        run_md_nve_systems_with_constraints(
             systems,
             number_of_steps,
             dt,
             box_length,
             thermostat,
-            SystemSimulationConfig::default(),
+            None,
         );
     }
 
-    pub fn run_md_nve_systems_with_config(
+    pub fn run_md_nve_systems_with_constraints(
         systems: &mut Vec<System>,
         number_of_steps: i32,
         dt: f64,
         box_length: f64,
         thermostat: &str,
-        config: SystemSimulationConfig,
+        constraint_options: Option<&ConstraintOptions>,
     ) {
         let mut values: Vec<f32> = Vec::new();
         let mut total_energy = 0.0;
@@ -2211,7 +2222,7 @@ pub mod lennard_jones_simulations {
 
         // --- time integration loop ---
         for _step in 0..number_of_steps {
-            for sys in systems.iter_mut() {
+            for (s, sys) in systems.iter_mut().enumerate() {
                 let mut a_old: Vec<Vector3<f64>> = Vec::with_capacity(sys.atoms.len());
 
                 for a in sys.atoms.iter() {
@@ -2227,6 +2238,16 @@ pub mod lennard_jones_simulations {
                 }
 
                 pbc_update(&mut sys.atoms, box_length);
+                if let Some(options) = constraint_options {
+                    if let Some(constraints) = options.constraints_by_system.get(s) {
+                        shake_rattle::apply_shake(
+                            sys,
+                            constraints,
+                            options.tolerance,
+                            options.max_iter,
+                        );
+                    }
+                }
 
                 for a in sys.atoms.iter_mut() {
                     a.force = Vector3::zeros();
@@ -2255,6 +2276,16 @@ pub mod lennard_jones_simulations {
                 for a in sys.atoms.iter_mut() {
                     let a_new = a.force / a.mass;
                     a.update_velocity_verlet(a_new, dt);
+                }
+                if let Some(options) = constraint_options {
+                    if let Some(constraints) = options.constraints_by_system.get(s) {
+                        shake_rattle::apply_rattle(
+                            sys,
+                            constraints,
+                            options.tolerance,
+                            options.max_iter,
+                        );
+                    }
                 }
 
                 let dof = 3 * sys.atoms.len();
