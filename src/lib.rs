@@ -1522,6 +1522,7 @@ pub mod lennard_jones_simulations {
                 a_old.push(a.force / a.mass);
             }
 
+            // --- half-step update for velocity and position ---
             // 1) velocity update (Verlet - half step)
             for (atom, a_o) in particles.iter_mut().zip(a_old.iter()) {
                 atom.velocity += 0.5 * a_o * dt;
@@ -1530,8 +1531,10 @@ pub mod lennard_jones_simulations {
             // 2) position update - needs to use the velocity that has been
             // updated using the half step method
             for atom in particles.iter_mut() {
-                atom.update_position_verlet(dt);
+                atom.update_position_verlet(dt); // the velocity has already been updated by a half step, so this will update the position by the half step
             }
+
+            // ----
 
             // 3) PBC
             pbc_update(particles, box_length);

@@ -1,133 +1,67 @@
-/*
-SHAKE pseudocode:
------------------
+pub mod shake_rattle {
+    use crate::lennard_jones_simulations::Particle;
+    use crate::molecule::molecule::System;
 
-Given:
-    positions r[i]
-    velocities v[i]
-    masses m[i]
-    forces f[i]
-    timestep dt
-    constraints C = {(i, j, d_ij)}
+    fn rattle(
+        tolerance: f64,
+        system: &mut System,
+        index_i: usize,
+        index_j: usize,
+        target_distance: f64,
+        max_iter: usize,
+    ) -> () {
+        /*
+        Rattle
+        ------
 
-For each MD step:
+        Rattle is basicall a velocity/verlet + constraint correction
 
-    # 1) Unconstrained integration step
-    for each atom i:
-        v_half[i] = v[i] + (dt/2) * f[i] / m[i]
-        r_trial[i] = r[i] + dt * v_half[i]
+        -> first correct positions so bond lengths are satisifed
+        -> then correct the velocities so the velocity constraints are satisfied
 
-    # 2) Iteratively enforce position constraints
-    r_new = r_trial
+        Essentially, we are nudging the atoms along the bond direction until the distance matches the target
 
-    repeat until converged or max_iters reached:
-        max_error = 0
+        so:
 
-        for each constraint (i, j, d):
-            rij = r_new[i] - r_new[j]
-            err = dot(rij, rij) - d*d
+        -> if the bond length is too long, pull them together
+        -> if the bond is too short, push them apart
 
-            max_error = max(max_error, abs(err))
+         */
 
-            if abs(err) > tolerance:
-                # solve for correction magnitude lambda
-                # (details depend on integrator / formulation)
-                lambda = approximate_constraint_multiplier(err, rij, m[i], m[j])
+        // compute the inverse masses
+        let inv_mi = 1.0 / system.atoms[index_i].mass;
+        let inv_mj = 1.0 / system.atoms[index_j].mass;
 
-                # apply mass-weighted opposite corrections
-                corr = lambda * rij
-                r_new[i] = r_new[i] + corr / m[i]
-                r_new[j] = r_new[j] - corr / m[j]
+        //let mut lambda_ij = 0.0; //
+        for _ in 0..max_iter {
+            let r_vec = system.atoms[index_j].position - system.atoms[index_i].position; // get vector for position
+            let dist_sq = r_vec.dot(&r_vec); // get the distance squared
 
-        if max_error < tolerance:
-            break
+            // position correction - for each constrained bond (i,j) with
+            // target distance (target_distance)
 
-    # 3) Recompute forces from constrained positions
-    f_new = forces(r_new)
+            let mut constraint_error = dist_sq - target_distance.powi(2);
+            // we must iteratively adjust positions until constraint_error is roughly 0
 
-    # 4) Finish velocity update
-    for each atom i:
-        v_new[i] = v_half[i] + (dt/2) * f_new[i] / m[i]
+            if constraint_error.abs() > tolerance {
+                break;
+            }
 
+            // avoid divide-by-zero
+            if dist_sq < 1e-12 {
+                panic!("Bond distance is too small during RATTLE correction");
+            }
 
+            // approximate the scalar correction
+            let lambda_ij = -constraint_error / (2.0 * (inv_mi + inv_mj) * dist_sq);
 
-Rattle pseudocode
------------------
+            let correction = lambda_ij * r_vec;
 
-RATTLE does the same position correction, but then adds a second stage so that the velocities are also consistent with the constraints.
+            // Apply mass-weighted corrections
+            system.atoms[index_i].position -= correction * inv_mi;
+            system.atoms[index_j].position += correction * inv_mj;
+        }
+    }
 
-For a fixed bond distance, not only must
-
-∣
-𝑟
-𝑖
-−
-𝑟
-𝑗
-∣
-2
-=
-𝑑
-2
-∣r
-i
-​
- −r
-j
-​
- ∣
-2
- =d
-2
-
-hold, but also its time derivative must be zero, which means there should be no relative velocity along the bond direction. LAMMPS explicitly notes that fix rattle modifies forces and velocities, while OpenMM separately provides “Constrain Velocities.”
-
-
-Given:
-    positions r[i]
-    velocities v[i]
-    masses m[i]
-    forces f[i]
-    timestep dt
-    constraints C = {(i, j, d_ij)}
-
-For each MD step:
-
-    # 1) Unconstrained integration step
-    for each atom i:
-        v_half[i] = v[i] + (dt/2) * f[i] / m[i]
-        r_trial[i] = r[i] + dt * v_half[i]
-
-    # 2) Iteratively enforce position constraints
-    r_new = r_trial
-
-    repeat until converged or max_iters reached:
-        max_error = 0
-
-        for each constraint (i, j, d):
-            rij = r_new[i] - r_new[j]
-            err = dot(rij, rij) - d*d
-
-            max_error = max(max_error, abs(err))
-
-            if abs(err) > tolerance:
-                # solve for correction magnitude lambda
-                # (details depend on integrator / formulation)
-                lambda = approximate_constraint_multiplier(err, rij, m[i], m[j])
-
-                # apply mass-weighted opposite corrections
-                corr = lambda * rij
-                r_new[i] = r_new[i] + corr / m[i]
-                r_new[j] = r_new[j] - corr / m[j]
-
-        if max_error < tolerance:
-            break
-
-    # 3) Recompute forces from constrained positions
-    f_new = forces(r_new)
-
-    # 4) Finish velocity update
-    for each atom i:
-        v_new[i] = v_half[i] + (dt/2) * f_new[i] / m[i]
-
-*/
+    fn shake(tolerance: f64) -> () {}
+}
