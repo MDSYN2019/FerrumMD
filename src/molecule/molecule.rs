@@ -12,6 +12,7 @@ use crate::lennard_jones_simulations::LJParameters;
 use crate::lennard_jones_simulations::Particle;
 
 use nalgebra::Vector3;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Copy, Clone)]
 pub struct SimpleBond {
@@ -72,6 +73,21 @@ pub struct Improper {
     pub psi0: f64,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct NonbondedPairScaling {
+    pub lj_scale: f64,
+    pub coulomb_scale: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RigidWaterDefinition {
+    pub oxygen_index: usize,
+    pub hydrogen1_index: usize,
+    pub hydrogen2_index: usize,
+    pub oh_distance: f64,
+    pub hh_distance: f64,
+}
+
 #[derive(Copy, Clone)]
 pub struct NonBondedType {
     pub mass: f64,
@@ -107,9 +123,43 @@ pub struct System {
     pub angles: Vec<Angle>,
     pub dihedrals: Vec<Dihedral>,
     pub impropers: Vec<Improper>,
+    pub exclusions: HashSet<(usize, usize)>,
+    pub pair_scalings: HashMap<(usize, usize), NonbondedPairScaling>,
+    pub rigid_water: Option<RigidWaterDefinition>,
 }
 
 // System is all the atoms (global), bonded terms in global indices, and exclusion sets
+impl System {
+    fn canonical_pair(i: usize, j: usize) -> (usize, usize) {
+        if i <= j {
+            (i, j)
+        } else {
+            (j, i)
+        }
+    }
+
+    pub fn add_exclusion(&mut self, i: usize, j: usize) {
+        self.exclusions.insert(Self::canonical_pair(i, j));
+    }
+
+    pub fn set_pair_scaling(&mut self, i: usize, j: usize, scaling: NonbondedPairScaling) {
+        self.pair_scalings
+            .insert(Self::canonical_pair(i, j), scaling);
+    }
+
+    pub fn nonbonded_scaling_for_pair(&self, i: usize, j: usize) -> Option<NonbondedPairScaling> {
+        if i == j || self.exclusions.contains(&Self::canonical_pair(i, j)) {
+            return None;
+        }
+        self.pair_scalings
+            .get(&Self::canonical_pair(i, j))
+            .copied()
+            .or(Some(NonbondedPairScaling {
+                lj_scale: 1.0,
+                coulomb_scale: 1.0,
+            }))
+    }
+}
 
 pub fn compute_bond_force(atoms: &mut Vec<Particle>, bond: &Bond, box_length: f64) -> f64 {
     /*
@@ -403,6 +453,7 @@ pub fn make_h2_system() -> System {
         angles: vec![],
         dihedrals: vec![],
         impropers: vec![],
+        ..System::default()
     }
 }
 

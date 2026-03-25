@@ -1,6 +1,6 @@
 use nalgebra::Vector3;
 use rand::Rng;
-use sang_md::lennard_jones_simulations::{self, ConstraintOptions, InitOutput};
+use sang_md::lennard_jones_simulations::{self, ConstraintMode, ConstraintOptions, InitOutput};
 use sang_md::molecule::io::write_gro_systems;
 use sang_md::molecule::martini;
 use sang_md::molecule::molecule::System;
@@ -97,8 +97,6 @@ fn main() -> Result<(), String> {
     let minimization_force_tolerance = 1e-3;
 
     let mut systems = create_tip3p_water_box(n_side, box_length)?;
-    let water_model = WaterRepresentation::Tip3pAtomistic;
-    validate_tip3p_nonbonded_model(&systems, water_model)?;
     minimize_systems(
         &mut systems,
         box_length,
@@ -122,12 +120,20 @@ fn main() -> Result<(), String> {
         .map(shake_rattle::tip3p_constraints_from_system)
         .collect();
     let constraint_options = ConstraintOptions {
+        mode: ConstraintMode::SettlePreferred,
         constraints_by_system: constraints_by_system?,
         tolerance: 1e-10,
         max_iter: 100,
     };
 
-    lennard_jones_simulations::run_md_nve_systems_with_constraints(Some(&constraint_options));
+    lennard_jones_simulations::run_md_nve_systems_with_constraints(
+        &mut systems,
+        nsteps,
+        dt,
+        box_length,
+        "none",
+        Some(&constraint_options),
+    );
 
     write_gro_systems(
         "tip3p_water_box.gro",
