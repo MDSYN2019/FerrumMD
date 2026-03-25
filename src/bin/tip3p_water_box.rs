@@ -55,6 +55,13 @@ fn minimize_systems(
     step_size: f64,
     force_tolerance: f64,
 ) {
+    log::info!(
+        "Starting minimization: max_steps={}, step_size={}, force_tolerance={}",
+        max_steps,
+        step_size,
+        force_tolerance
+    );
+
     for step in 0..max_steps {
         for sys in systems.iter_mut() {
             lennard_jones_simulations::compute_all_bonded_forces_system(sys, box_length);
@@ -75,8 +82,12 @@ fn minimize_systems(
             lennard_jones_simulations::pbc_update(&mut sys.atoms, box_length);
         }
 
+        if step == 0 || (step + 1) % 10 == 0 || step + 1 == max_steps {
+            log::info!("Minimization step {:>4} | max |F| = {:.6}", step + 1, max_force);
+        }
+
         if max_force < force_tolerance {
-            println!(
+            log::info!(
                 "Minimization converged in {} steps (max |F| = {:.6})",
                 step + 1,
                 max_force
@@ -85,7 +96,7 @@ fn minimize_systems(
         }
     }
 
-    println!("Minimization reached max steps without full convergence (max_steps={max_steps})");
+    log::warn!("Minimization reached max steps without full convergence (max_steps={max_steps})");
 }
 
 fn main() -> Result<(), String> {
