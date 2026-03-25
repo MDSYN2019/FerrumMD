@@ -236,6 +236,15 @@ pub fn write_gro_systems(
     fs::write(path, output).map_err(|e| format!("failed to write gro file at '{path}': {e}"))
 }
 
+pub fn systems_to_particles_frame(systems: &[System]) -> Vec<Particle> {
+    let natoms: usize = systems.iter().map(|system| system.atoms.len()).sum();
+    let mut frame = Vec::with_capacity(natoms);
+    for system in systems {
+        frame.extend(system.atoms.iter().cloned());
+    }
+    frame
+}
+
 pub fn write_xtc(
     path: &str,
     frames: &[Vec<Particle>],
