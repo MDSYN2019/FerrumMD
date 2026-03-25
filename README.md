@@ -47,6 +47,23 @@ Implements Lennard-Jones (LJ) interactions, bonded forces, velocity-Verlet time 
 
 ---
 
+## 📏 Unit conventions (explicit)
+
+FerrumMD uses a single explicit MD unit system internally:
+
+- **Coordinates / box lengths:** `nm`
+- **Velocities:** `nm/ps`
+- **Forces:** `kJ/(mol·nm)`
+- **Charges:** elementary charge `e`
+- **Masses:** atomic mass unit `amu`
+- **Timestep (`dt`):** `ps`
+- **Energies (kinetic, LJ, Coulomb, total):** `kJ/mol`
+- **Coulomb prefactor:** `138.935457644 kJ mol^-1 nm e^-2`
+
+GRO I/O is now unit-preserving (nm in file and nm in memory), so there is no hidden nm↔Å conversion path.
+
+---
+
 ## 🚀 Getting Started
 
 ### Install Rust

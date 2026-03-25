@@ -129,9 +129,8 @@ pub fn read_gro_from_str(contents: &str) -> Result<(Vec<Particle>, Option<Vector
             }
         };
 
-        // GRO coordinates are in nm and the rest of this repository uses reduced/Å-like units.
-        // Keep units explicit by converting nm -> Å.
-        let position = Vector3::new(x_nm * 10.0, y_nm * 10.0, z_nm * 10.0);
+        // GRO coordinates are in nm and FerrumMD stores coordinates in nm.
+        let position = Vector3::new(x_nm, y_nm, z_nm);
 
         particles.push(particle_from_coordinates(atom_idx + 1, atom_name, position));
     }
@@ -144,11 +143,7 @@ pub fn read_gro_from_str(contents: &str) -> Result<(Vec<Particle>, Option<Vector
         .map_err(|e| format!("failed to parse gro box line: {e}"))?;
 
     let box_dims = if box_values.len() >= 3 {
-        Some(Vector3::new(
-            box_values[0] * 10.0,
-            box_values[1] * 10.0,
-            box_values[2] * 10.0,
-        ))
+        Some(Vector3::new(box_values[0], box_values[1], box_values[2]))
     } else {
         None
     };
@@ -168,7 +163,7 @@ pub fn write_gro(
     box_dims: Vector3<f64>,
     title: &str,
 ) -> Result<(), String> {
-    // GRO expects distances in nm while this codebase stores positions in Å-like units.
+    // GRO expects distances in nm and FerrumMD stores positions in nm.
     let mut output = String::new();
     output.push_str(title);
     output.push('\n');
@@ -181,17 +176,15 @@ pub fn write_gro(
             "WAT",
             "OW",
             index + 1,
-            particle.position.x / 10.0,
-            particle.position.y / 10.0,
-            particle.position.z / 10.0,
+            particle.position.x,
+            particle.position.y,
+            particle.position.z,
         ));
     }
 
     output.push_str(&format!(
         "{:>10.5}{:>10.5}{:>10.5}\n",
-        box_dims.x / 10.0,
-        box_dims.y / 10.0,
-        box_dims.z / 10.0,
+        box_dims.x, box_dims.y, box_dims.z,
     ));
 
     fs::write(path, output).map_err(|e| format!("failed to write gro file at '{path}': {e}"))
@@ -226,9 +219,9 @@ pub fn write_gro_systems(
                 "WAT",
                 atom_name,
                 atom_serial % 100_000,
-                atom.position.x / 10.0,
-                atom.position.y / 10.0,
-                atom.position.z / 10.0,
+                atom.position.x,
+                atom.position.y,
+                atom.position.z,
             ));
 
             atom_serial += 1;
@@ -237,9 +230,7 @@ pub fn write_gro_systems(
 
     output.push_str(&format!(
         "{:>10.5}{:>10.5}{:>10.5}\n",
-        box_dims.x / 10.0,
-        box_dims.y / 10.0,
-        box_dims.z / 10.0,
+        box_dims.x, box_dims.y, box_dims.z,
     ));
 
     fs::write(path, output).map_err(|e| format!("failed to write gro file at '{path}': {e}"))
@@ -273,9 +264,9 @@ pub fn write_xtc(
         XTCTrajectory::open_write(path).map_err(|e| format!("failed to open xtc file: {e}"))?;
 
     let box_nm = [
-        [box_dims.x as f32 / 10.0, 0.0, 0.0],
-        [0.0, box_dims.y as f32 / 10.0, 0.0],
-        [0.0, 0.0, box_dims.z as f32 / 10.0],
+        [box_dims.x as f32, 0.0, 0.0],
+        [0.0, box_dims.y as f32, 0.0],
+        [0.0, 0.0, box_dims.z as f32],
     ];
 
     for (step, frame_particles) in frames.iter().enumerate() {
@@ -286,9 +277,9 @@ pub fn write_xtc(
 
         for (atom_idx, particle) in frame_particles.iter().enumerate() {
             frame.coords[atom_idx] = [
-                particle.position.x as f32 / 10.0,
-                particle.position.y as f32 / 10.0,
-                particle.position.z as f32 / 10.0,
+                particle.position.x as f32,
+                particle.position.y as f32,
+                particle.position.z as f32,
             ];
         }
 
@@ -330,10 +321,10 @@ END\n";
 
         let (particles, box_dims) = read_gro_from_str(gro).expect("gro should parse");
         assert_eq!(particles.len(), 2);
-        assert!((particles[0].position.x - 1.11).abs() < 1e-9);
+        assert!((particles[0].position.x - 0.111).abs() < 1e-9);
 
         let box_dims = box_dims.expect("box dims should exist");
-        assert!((box_dims.x - 10.0).abs() < 1e-9);
+        assert!((box_dims.x - 1.0).abs() < 1e-9);
     }
 
     #[test]
@@ -364,6 +355,6 @@ END\n";
         let content = fs::read_to_string(&path).expect("gro file readable");
         let _ = fs::remove_file(path);
         assert!(content.contains("WAT"));
-        assert!(content.contains("0.100"));
+        assert!(content.contains("1.000"));
     }
 }
