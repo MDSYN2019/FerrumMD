@@ -1,5 +1,7 @@
 use crate::lennard_jones_simulations::{LJParameters, Particle};
-use crate::molecule::molecule::{Angle, Bond, Dihedral, System};
+use crate::molecule::molecule::{
+    Angle, Bond, Dihedral, NonbondedPairScaling, RigidWaterDefinition, System,
+};
 use nalgebra::Vector3;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -51,6 +53,21 @@ pub struct ItpDihedral {
     pub multiplicity: usize,
 }
 
+#[derive(Clone, Debug)]
+pub struct ItpSettles {
+    pub oxygen_atom: usize,
+    pub oh_distance: f64,
+    pub hh_distance: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct ItpPair {
+    pub atom1: usize,
+    pub atom2: usize,
+    pub lj_scale: f64,
+    pub coulomb_scale: f64,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ItpForceField {
     pub molecule_name: Option<String>,
@@ -59,6 +76,9 @@ pub struct ItpForceField {
     pub bonds: Vec<ItpBond>,
     pub angles: Vec<ItpAngle>,
     pub dihedrals: Vec<ItpDihedral>,
+    pub exclusions: Vec<(usize, usize)>,
+    pub pairs: Vec<ItpPair>,
+    pub settles: Vec<ItpSettles>,
 }
 
 impl ItpForceField {
@@ -112,6 +132,23 @@ impl ItpForceField {
                 "dihedrals" => {
                     ff.dihedrals.push(
                         parse_dihedral(&tokens)
+                            .map_err(|e| format!("line {}: {e}", line_number + 1))?,
+                    );
+                }
+                "exclusions" => {
+                    let entries = parse_exclusions(&tokens)
+                        .map_err(|e| format!("line {}: {e}", line_number + 1))?;
+                    ff.exclusions.extend(entries);
+                }
+                "pairs" => {
+                    ff.pairs.push(
+                        parse_pair(&tokens)
+                            .map_err(|e| format!("line {}: {e}", line_number + 1))?,
+                    );
+                }
+                "settles" => {
+                    ff.settles.push(
+                        parse_settles(&tokens)
                             .map_err(|e| format!("line {}: {e}", line_number + 1))?,
                     );
                 }
@@ -246,13 +283,62 @@ impl ItpForceField {
             })
             .collect();
 
-        Ok(System {
+        let mut system = System {
             atoms: particles,
             bonds,
             angles,
             dihedrals,
             impropers: Vec::new(),
-        })
+            ..System::default()
+        };
+
+        for &(i, j) in &self.exclusions {
+            system.add_exclusion(i - 1, j - 1);
+        }
+
+        for pair in &self.pairs {
+            system.set_pair_scaling(
+                pair.atom1 - 1,
+                pair.atom2 - 1,
+                NonbondedPairScaling {
+                    lj_scale: pair.lj_scale,
+                    coulomb_scale: pair.coulomb_scale,
+                },
+            );
+        }
+
+        if let Some(settle) = self.settles.first() {
+            let oxygen = settle.oxygen_atom - 1;
+            let hydrogens: Vec<usize> = self
+                .bonds
+                .iter()
+                .filter_map(|bond| {
+                    if bond.atom1 - 1 == oxygen {
+                        Some(bond.atom2 - 1)
+                    } else if bond.atom2 - 1 == oxygen {
+                        Some(bond.atom1 - 1)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if hydrogens.len() == 2 {
+                system.rigid_water = Some(RigidWaterDefinition {
+                    oxygen_index: oxygen,
+                    hydrogen1_index: hydrogens[0],
+                    hydrogen2_index: hydrogens[1],
+                    oh_distance: settle.oh_distance,
+                    hh_distance: settle.hh_distance,
+                });
+            } else {
+                return Err(
+                    "invalid [ settles ] entry: expected oxygen bonded to two hydrogens"
+                        .to_string(),
+                );
+            }
+        }
+
+        Ok(system)
     }
 }
 
@@ -386,6 +472,55 @@ fn parse_dihedral(tokens: &[&str]) -> Result<ItpDihedral, String> {
         phase_deg: parse_f64(tokens, 5, "dihedral phase")?,
         force_constant: parse_f64(tokens, 6, "dihedral force constant")?,
         multiplicity: parse_usize(tokens, 7, "dihedral multiplicity")?,
+    })
+}
+
+fn parse_settles(tokens: &[&str]) -> Result<ItpSettles, String> {
+    if tokens.len() < 4 {
+        return Err("settles row requires at least 4 columns".to_string());
+    }
+
+    Ok(ItpSettles {
+        oxygen_atom: parse_usize(tokens, 0, "settles oxygen atom")?,
+        oh_distance: parse_f64(tokens, 2, "settles O-H distance")?,
+        hh_distance: parse_f64(tokens, 3, "settles H-H distance")?,
+    })
+}
+
+fn parse_exclusions(tokens: &[&str]) -> Result<Vec<(usize, usize)>, String> {
+    if tokens.len() < 2 {
+        return Err("exclusions row requires at least 2 columns".to_string());
+    }
+    let atom = parse_usize(tokens, 0, "exclusions atom")?;
+    let mut pairs = Vec::with_capacity(tokens.len() - 1);
+    for idx in 1..tokens.len() {
+        let excluded_atom = parse_usize(tokens, idx, "excluded atom")?;
+        pairs.push((atom, excluded_atom));
+    }
+    Ok(pairs)
+}
+
+fn parse_pair(tokens: &[&str]) -> Result<ItpPair, String> {
+    if tokens.len() < 2 {
+        return Err("pairs row requires at least 2 columns".to_string());
+    }
+
+    let lj_scale = if tokens.len() >= 5 {
+        parse_f64(tokens, 3, "pair LJ scale")?
+    } else {
+        1.0
+    };
+    let coulomb_scale = if tokens.len() >= 5 {
+        parse_f64(tokens, 4, "pair Coulomb scale")?
+    } else {
+        1.0
+    };
+
+    Ok(ItpPair {
+        atom1: parse_usize(tokens, 0, "pair atom1")?,
+        atom2: parse_usize(tokens, 1, "pair atom2")?,
+        lj_scale,
+        coulomb_scale,
     })
 }
 
@@ -613,5 +748,46 @@ OWT3 8 15.999400 -0.834 A 0.315058 0.636386
         let atom_type = atom_types.get("OWT3").expect("OWT3 should exist");
         assert!((atom_type.mass - 15.9994).abs() < 1e-12);
         assert!((atom_type.charge + 0.834).abs() < 1e-12);
+    }
+
+    #[test]
+    fn parses_settles_exclusions_and_pairs() {
+        let itp = r#"
+[ atomtypes ]
+OW 15.9994 -0.834 A 0.315058 0.636386
+HW 1.008 0.417 A 0.0 0.0
+[ atoms ]
+1 OW 1 WAT OW 1 -0.834 15.9994
+2 HW 1 WAT HW1 1 0.417 1.008
+3 HW 1 WAT HW2 1 0.417 1.008
+[ bonds ]
+1 2 1 0.09572 1000
+1 3 1 0.09572 1000
+[ settles ]
+1 1 0.09572 0.15139
+[ exclusions ]
+1 2 3
+[ pairs ]
+2 3 1 0.5 0.8333
+"#;
+        let ff = ItpForceField::parse_str(itp).expect("itp parsing should succeed");
+        assert_eq!(ff.settles.len(), 1);
+        assert_eq!(ff.exclusions.len(), 2);
+        assert_eq!(ff.pairs.len(), 1);
+        let coords = vec![
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(0.09572, 0.0, 0.0),
+            Vector3::new(-0.023999, 0.092663, 0.0),
+        ];
+        let system = ff.to_system(&coords).expect("system build should succeed");
+        assert!(system.rigid_water.is_some());
+        assert!(system.exclusions.contains(&(0, 1)));
+        assert!(system.exclusions.contains(&(0, 2)));
+        let pair = system
+            .pair_scalings
+            .get(&(1, 2))
+            .expect("pair scaling should exist");
+        assert!((pair.lj_scale - 0.5).abs() < 1e-12);
+        assert!((pair.coulomb_scale - 0.8333).abs() < 1e-12);
     }
 }

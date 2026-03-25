@@ -374,6 +374,7 @@ impl CharmmForceField {
             angles,
             dihedrals,
             impropers,
+            ..System::default()
         })
     }
 

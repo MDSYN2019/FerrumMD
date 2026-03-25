@@ -54,7 +54,9 @@ pub mod shake_rattle {
         system: &System,
     ) -> Result<Vec<DistanceConstraint>, String> {
         if system.atoms.len() != 3 {
-            return Err("TIP3P constraint builder expects exactly 3 atoms per molecule.".to_string());
+            return Err(
+                "TIP3P constraint builder expects exactly 3 atoms per molecule.".to_string(),
+            );
         }
         constraints_from_pairs(system, &[(0, 1), (0, 2), (1, 2)])
     }
@@ -107,8 +109,10 @@ pub mod shake_rattle {
         let inv_mj = 1.0 / system.atoms[index_j].mass;
 
         for _ in 0..max_iter {
-            let r_vec: Vector3<f64> = system.atoms[index_j].position - system.atoms[index_i].position;
-            let v_vec: Vector3<f64> = system.atoms[index_j].velocity - system.atoms[index_i].velocity;
+            let r_vec: Vector3<f64> =
+                system.atoms[index_j].position - system.atoms[index_i].position;
+            let v_vec: Vector3<f64> =
+                system.atoms[index_j].velocity - system.atoms[index_i].velocity;
             let dist_sq = r_vec.dot(&r_vec);
             if dist_sq <= 1e-12 {
                 break;

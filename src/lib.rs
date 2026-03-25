@@ -316,7 +316,7 @@ pub mod lennard_jones_simulations {
     use mpi::collective::SystemOperation;
     #[cfg(feature = "mpi")]
     use mpi::traits::*;
-    use nalgebra::{zero, Vector3};
+    use nalgebra::{zero, Matrix3, Vector3};
     use rand::Rng;
     use rand_distr::{Distribution, Normal};
 
@@ -492,7 +492,15 @@ pub mod lennard_jones_simulations {
     }
 
     #[derive(Clone, Debug)]
+    pub enum ConstraintMode {
+        Flexible,
+        ShakeRattle,
+        SettlePreferred,
+    }
+
+    #[derive(Clone, Debug)]
     pub struct ConstraintOptions {
+        pub mode: ConstraintMode,
         pub constraints_by_system: Vec<Vec<DistanceConstraint>>,
         pub tolerance: f64,
         pub max_iter: usize,
@@ -930,6 +938,22 @@ pub mod lennard_jones_simulations {
         atom_map
     }
 
+    fn lj_coulomb_scaling_for_pair(
+        systems: &[System],
+        atom_map: &[(usize, usize)],
+        global_i: usize,
+        global_j: usize,
+    ) -> Option<(f64, f64)> {
+        let (sys_i, atom_i) = atom_map[global_i];
+        let (sys_j, atom_j) = atom_map[global_j];
+        if sys_i != sys_j {
+            return Some((1.0, 1.0));
+        }
+        systems[sys_i]
+            .nonbonded_scaling_for_pair(atom_i, atom_j)
+            .map(|scale| (scale.lj_scale, scale.coulomb_scale))
+    }
+
     fn compute_intermolecular_forces_systems_with_pairs(
         systems: &mut [System],
         box_length: f64,
@@ -946,6 +970,11 @@ pub mod lennard_jones_simulations {
             if sys_i_idx_raw == sys_j_idx_raw {
                 continue;
             }
+            let Some((lj_scale, _)) =
+                lj_coulomb_scaling_for_pair(systems, &atom_map, global_i, global_j)
+            else {
+                continue;
+            };
 
             let (sys_i_idx, atom_i_idx, sys_j_idx, atom_j_idx, swap_sign) =
                 if sys_i_idx_raw < sys_j_idx_raw {
@@ -986,13 +1015,63 @@ pub mod lennard_jones_simulations {
             let f_mag = lennard_jones_force_scalar(r, sigma, epsilon);
             let f_vec = (r_mic / r) * f_mag * swap_sign;
 
-            atom_i.force -= f_vec;
-            atom_j.force += f_vec;
+            atom_i.force -= f_vec * lj_scale;
+            atom_j.force += f_vec * lj_scale;
 
-            total_energy += lennard_jones_potential(r, sigma, epsilon);
+            total_energy += lj_scale * lennard_jones_potential(r, sigma, epsilon);
         }
 
+        total_energy +=
+            compute_intramolecular_pair_lj_forces_and_energy(systems, box_length, cutoff);
+
         total_energy
+    }
+
+    fn compute_intramolecular_pair_lj_forces_and_energy(
+        systems: &mut [System],
+        box_length: f64,
+        cutoff: f64,
+    ) -> f64 {
+        let cutoff2 = cutoff * cutoff;
+        let mut energy = 0.0;
+
+        for sys in systems.iter_mut() {
+            let pairs: Vec<(
+                (usize, usize),
+                crate::molecule::molecule::NonbondedPairScaling,
+            )> = sys.pair_scalings.iter().map(|(k, v)| (*k, *v)).collect();
+            for ((i, j), scaling) in pairs {
+                if scaling.lj_scale == 0.0 || sys.exclusions.contains(&(i, j)) {
+                    continue;
+                }
+                if i >= sys.atoms.len() || j >= sys.atoms.len() || i == j {
+                    continue;
+                }
+                let (ai, aj) = if i < j {
+                    let (left, right) = sys.atoms.split_at_mut(j);
+                    (&mut left[i], &mut right[0])
+                } else {
+                    let (left, right) = sys.atoms.split_at_mut(i);
+                    (&mut right[0], &mut left[j])
+                };
+                let r_vec = aj.position - ai.position;
+                let r_mic = minimum_image_convention(r_vec, box_length);
+                let r2 = r_mic.norm_squared();
+                if r2 <= 1e-24 || r2 > cutoff2 {
+                    continue;
+                }
+                let r = safe_norm(r2.sqrt());
+                let sigma = 0.5 * (ai.lj_parameters.sigma + aj.lj_parameters.sigma);
+                let epsilon = (ai.lj_parameters.epsilon * aj.lj_parameters.epsilon).sqrt();
+                let f_mag = lennard_jones_force_scalar(r, sigma, epsilon);
+                let f_vec = (r_mic / r) * f_mag * scaling.lj_scale;
+                ai.force -= f_vec;
+                aj.force += f_vec;
+                energy += scaling.lj_scale * lennard_jones_potential(r, sigma, epsilon);
+            }
+        }
+
+        energy
     }
 
     pub fn compute_intermolecular_forces_systems(systems: &mut [System], box_length: f64) -> f64 {
@@ -1086,7 +1165,42 @@ pub mod lennard_jones_simulations {
             }
         }
 
+        total_energy += intramolecular_pair_lj_energy_systems(systems, box_length, cutoff);
+
         total_energy
+    }
+
+    fn intramolecular_pair_lj_energy_systems(
+        systems: &[System],
+        box_length: f64,
+        cutoff: f64,
+    ) -> f64 {
+        let cutoff2 = cutoff * cutoff;
+        let mut energy = 0.0;
+        for sys in systems {
+            for (&(i, j), scaling) in &sys.pair_scalings {
+                if scaling.lj_scale == 0.0 || sys.exclusions.contains(&(i, j)) {
+                    continue;
+                }
+                if i >= sys.atoms.len() || j >= sys.atoms.len() || i == j {
+                    continue;
+                }
+                let r_vec = sys.atoms[j].position - sys.atoms[i].position;
+                let r_mic = minimum_image_convention(r_vec, box_length);
+                let r2 = r_mic.norm_squared();
+                if r2 <= 1e-24 || r2 > cutoff2 {
+                    continue;
+                }
+                let r = safe_norm(r2.sqrt());
+                let sigma =
+                    0.5 * (sys.atoms[i].lj_parameters.sigma + sys.atoms[j].lj_parameters.sigma);
+                let epsilon = (sys.atoms[i].lj_parameters.epsilon
+                    * sys.atoms[j].lj_parameters.epsilon)
+                    .sqrt();
+                energy += scaling.lj_scale * lennard_jones_potential(r, sigma, epsilon);
+            }
+        }
+        energy
     }
 
     pub fn compute_bonded_forces_system(
@@ -1608,22 +1722,272 @@ pub mod lennard_jones_simulations {
         box_length: f64,
         pme: &PmeConfig,
     ) -> f64 {
-        let mut all_atoms: Vec<Particle> = systems
-            .iter()
-            .flat_map(|s| s.atoms.iter().cloned())
-            .collect();
+        let atom_map = flatten_system_atom_map(systems);
+        let mut energy = 0.0;
+        let alpha = pme.alpha;
+        let rc = pme.real_cutoff;
+        let k_e = coulomb_prefactor();
 
-        let energy = add_electrostatic_forces_particles(&mut all_atoms, box_length, pme);
+        for global_i in 0..atom_map.len() {
+            for global_j in (global_i + 1)..atom_map.len() {
+                let Some((_, coulomb_scale)) =
+                    lj_coulomb_scaling_for_pair(systems, &atom_map, global_i, global_j)
+                else {
+                    continue;
+                };
+                if coulomb_scale == 0.0 {
+                    continue;
+                }
 
-        let mut idx = 0usize;
-        for sys in systems.iter_mut() {
-            for atom in sys.atoms.iter_mut() {
-                atom.force += all_atoms[idx].force;
-                idx += 1;
+                let (sys_i_idx_raw, atom_i_idx_raw) = atom_map[global_i];
+                let (sys_j_idx_raw, atom_j_idx_raw) = atom_map[global_j];
+
+                let (sys_i_idx, atom_i_idx, sys_j_idx, atom_j_idx, swap_sign) =
+                    if sys_i_idx_raw < sys_j_idx_raw {
+                        (
+                            sys_i_idx_raw,
+                            atom_i_idx_raw,
+                            sys_j_idx_raw,
+                            atom_j_idx_raw,
+                            1.0,
+                        )
+                    } else if sys_j_idx_raw < sys_i_idx_raw {
+                        (
+                            sys_j_idx_raw,
+                            atom_j_idx_raw,
+                            sys_i_idx_raw,
+                            atom_i_idx_raw,
+                            -1.0,
+                        )
+                    } else if atom_i_idx_raw < atom_j_idx_raw {
+                        (
+                            sys_i_idx_raw,
+                            atom_i_idx_raw,
+                            sys_j_idx_raw,
+                            atom_j_idx_raw,
+                            1.0,
+                        )
+                    } else {
+                        (
+                            sys_j_idx_raw,
+                            atom_j_idx_raw,
+                            sys_i_idx_raw,
+                            atom_i_idx_raw,
+                            -1.0,
+                        )
+                    };
+
+                if sys_i_idx == sys_j_idx {
+                    let sys = &mut systems[sys_i_idx];
+                    let (atom_i, atom_j) = if atom_i_idx < atom_j_idx {
+                        let (left, right) = sys.atoms.split_at_mut(atom_j_idx);
+                        (&mut left[atom_i_idx], &mut right[0])
+                    } else {
+                        let (left, right) = sys.atoms.split_at_mut(atom_i_idx);
+                        (&mut right[0], &mut left[atom_j_idx])
+                    };
+                    let qi = atom_i.charge;
+                    let qj = atom_j.charge;
+                    if qi == 0.0 && qj == 0.0 {
+                        continue;
+                    }
+                    let rij =
+                        minimum_image_convention(atom_j.position - atom_i.position, box_length);
+                    let r = rij.norm();
+                    if r <= 1e-12 || r > rc {
+                        continue;
+                    }
+                    let ar = alpha * r;
+                    let erfc_ar = erfc_approx(ar);
+                    let exp_term = (-(ar * ar)).exp();
+                    let qq = k_e * qi * qj * coulomb_scale;
+                    energy += qq * erfc_ar / r;
+                    let scalar = qq
+                        * (erfc_ar / (r * r)
+                            + (2.0 * alpha / std::f64::consts::PI.sqrt()) * exp_term / r);
+                    let f_vec = -(rij / r) * scalar * swap_sign;
+                    atom_i.force += f_vec;
+                    atom_j.force -= f_vec;
+                    continue;
+                }
+
+                let (left, right) = systems.split_at_mut(sys_j_idx);
+                let sys_i = &mut left[sys_i_idx];
+                let sys_j = &mut right[0];
+                let atom_i = &mut sys_i.atoms[atom_i_idx];
+                let atom_j = &mut sys_j.atoms[atom_j_idx];
+                let qi = atom_i.charge;
+                let qj = atom_j.charge;
+                if qi == 0.0 && qj == 0.0 {
+                    continue;
+                }
+
+                let rij = minimum_image_convention(atom_j.position - atom_i.position, box_length);
+                let r = rij.norm();
+                if r <= 1e-12 || r > rc {
+                    continue;
+                }
+
+                let ar = alpha * r;
+                let erfc_ar = erfc_approx(ar);
+                let exp_term = (-(ar * ar)).exp();
+                let qq = k_e * qi * qj * coulomb_scale;
+                energy += qq * erfc_ar / r;
+
+                let scalar = qq
+                    * (erfc_ar / (r * r)
+                        + (2.0 * alpha / std::f64::consts::PI.sqrt()) * exp_term / r);
+                let f_vec = -(rij / r) * scalar * swap_sign;
+                atom_i.force += f_vec;
+                atom_j.force -= f_vec;
             }
         }
 
         energy
+    }
+
+    fn enforce_settle_position(system: &mut System) {
+        let Some(rigid) = system.rigid_water else {
+            return;
+        };
+        let o = rigid.oxygen_index;
+        let h1 = rigid.hydrogen1_index;
+        let h2 = rigid.hydrogen2_index;
+        if o >= system.atoms.len() || h1 >= system.atoms.len() || h2 >= system.atoms.len() {
+            return;
+        }
+
+        let m_o = system.atoms[o].mass;
+        let m_h1 = system.atoms[h1].mass;
+        let m_h2 = system.atoms[h2].mass;
+        let total_mass = m_o + m_h1 + m_h2;
+        if total_mass <= 0.0 {
+            return;
+        }
+        let com = (system.atoms[o].position * m_o
+            + system.atoms[h1].position * m_h1
+            + system.atoms[h2].position * m_h2)
+            / total_mass;
+
+        let mut e1 = system.atoms[h1].position - system.atoms[o].position;
+        if e1.norm_squared() < 1e-18 {
+            e1 = Vector3::new(1.0, 0.0, 0.0);
+        }
+        e1 = e1.normalize();
+        let mut in_plane = system.atoms[h2].position - system.atoms[o].position;
+        in_plane -= e1 * in_plane.dot(&e1);
+        if in_plane.norm_squared() < 1e-18 {
+            in_plane = Vector3::new(0.0, 1.0, 0.0);
+        }
+        let e2 = in_plane.normalize();
+        let e3 = e1.cross(&e2);
+
+        let d_oh = rigid.oh_distance;
+        let d_hh = rigid.hh_distance;
+        let x = (d_hh * d_hh) / (2.0 * d_oh);
+        let y_sq = (d_oh * d_oh - x * x).max(0.0);
+        let y = y_sq.sqrt();
+        let r_h1 = Vector3::new(x, y, 0.0);
+        let r_h2 = Vector3::new(x, -y, 0.0);
+        let r_o = -(m_h1 * r_h1 + m_h2 * r_h2) / m_o;
+
+        let world = |r: Vector3<f64>| com + e1 * r.x + e2 * r.y + e3 * r.z;
+        system.atoms[o].position = world(r_o);
+        system.atoms[h1].position = world(r_h1);
+        system.atoms[h2].position = world(r_h2);
+    }
+
+    fn enforce_settle_velocity(system: &mut System) {
+        let Some(rigid) = system.rigid_water else {
+            return;
+        };
+        let o = rigid.oxygen_index;
+        let h1 = rigid.hydrogen1_index;
+        let h2 = rigid.hydrogen2_index;
+        if o >= system.atoms.len() || h1 >= system.atoms.len() || h2 >= system.atoms.len() {
+            return;
+        }
+        let m_o = system.atoms[o].mass;
+        let m_h1 = system.atoms[h1].mass;
+        let m_h2 = system.atoms[h2].mass;
+        let total_mass = m_o + m_h1 + m_h2;
+        if total_mass <= 0.0 {
+            return;
+        }
+
+        let v_com = (system.atoms[o].velocity * m_o
+            + system.atoms[h1].velocity * m_h1
+            + system.atoms[h2].velocity * m_h2)
+            / total_mass;
+        let com = (system.atoms[o].position * m_o
+            + system.atoms[h1].position * m_h1
+            + system.atoms[h2].position * m_h2)
+            / total_mass;
+        let r_o = system.atoms[o].position - com;
+        let r_h1 = system.atoms[h1].position - com;
+        let r_h2 = system.atoms[h2].position - com;
+
+        let l = m_o * r_o.cross(&(system.atoms[o].velocity - v_com))
+            + m_h1 * r_h1.cross(&(system.atoms[h1].velocity - v_com))
+            + m_h2 * r_h2.cross(&(system.atoms[h2].velocity - v_com));
+
+        let inertia = |r: Vector3<f64>, m: f64| {
+            let r2 = r.norm_squared();
+            m * (Matrix3::identity() * r2 - r * r.transpose())
+        };
+        let i_tensor = inertia(r_o, m_o) + inertia(r_h1, m_h1) + inertia(r_h2, m_h2);
+        let omega = i_tensor
+            .try_inverse()
+            .map(|inv| inv * l)
+            .unwrap_or_else(Vector3::zeros);
+
+        system.atoms[o].velocity = v_com + omega.cross(&r_o);
+        system.atoms[h1].velocity = v_com + omega.cross(&r_h1);
+        system.atoms[h2].velocity = v_com + omega.cross(&r_h2);
+    }
+
+    fn apply_constraint_positions(
+        system: &mut System,
+        constraints: Option<&[DistanceConstraint]>,
+        options: &ConstraintOptions,
+    ) {
+        match options.mode {
+            ConstraintMode::Flexible => {}
+            ConstraintMode::ShakeRattle => {
+                if let Some(c) = constraints {
+                    shake_rattle::apply_shake(system, c, options.tolerance, options.max_iter);
+                }
+            }
+            ConstraintMode::SettlePreferred => {
+                if system.rigid_water.is_some() {
+                    enforce_settle_position(system);
+                } else if let Some(c) = constraints {
+                    shake_rattle::apply_shake(system, c, options.tolerance, options.max_iter);
+                }
+            }
+        }
+    }
+
+    fn apply_constraint_velocities(
+        system: &mut System,
+        constraints: Option<&[DistanceConstraint]>,
+        options: &ConstraintOptions,
+    ) {
+        match options.mode {
+            ConstraintMode::Flexible => {}
+            ConstraintMode::ShakeRattle => {
+                if let Some(c) = constraints {
+                    shake_rattle::apply_rattle(system, c, options.tolerance, options.max_iter);
+                }
+            }
+            ConstraintMode::SettlePreferred => {
+                if system.rigid_water.is_some() {
+                    enforce_settle_velocity(system);
+                } else if let Some(c) = constraints {
+                    shake_rattle::apply_rattle(system, c, options.tolerance, options.max_iter);
+                }
+            }
+        }
     }
 
     pub fn run_md_andersen_particles(
@@ -2180,6 +2544,7 @@ pub mod lennard_jones_simulations {
         thermostat: &str,
         constraint_options: Option<&ConstraintOptions>,
     ) {
+        let config = SystemSimulationConfig::default();
         let mut values: Vec<f32> = Vec::new();
         let mut total_energy = 0.0;
         let mut kinetic_energy = 0.0;
@@ -2239,14 +2604,8 @@ pub mod lennard_jones_simulations {
 
                 pbc_update(&mut sys.atoms, box_length);
                 if let Some(options) = constraint_options {
-                    if let Some(constraints) = options.constraints_by_system.get(s) {
-                        shake_rattle::apply_shake(
-                            sys,
-                            constraints,
-                            options.tolerance,
-                            options.max_iter,
-                        );
-                    }
+                    let constraints = options.constraints_by_system.get(s).map(|c| c.as_slice());
+                    apply_constraint_positions(sys, constraints, options);
                 }
 
                 for a in sys.atoms.iter_mut() {
@@ -2278,14 +2637,8 @@ pub mod lennard_jones_simulations {
                     a.update_velocity_verlet(a_new, dt);
                 }
                 if let Some(options) = constraint_options {
-                    if let Some(constraints) = options.constraints_by_system.get(s) {
-                        shake_rattle::apply_rattle(
-                            sys,
-                            constraints,
-                            options.tolerance,
-                            options.max_iter,
-                        );
-                    }
+                    let constraints = options.constraints_by_system.get(s).map(|c| c.as_slice());
+                    apply_constraint_velocities(sys, constraints, options);
                 }
 
                 let dof = 3 * sys.atoms.len();
@@ -2409,6 +2762,7 @@ pub mod lennard_jones_simulations {
 mod tests {
     use super::*;
     use log::{error, info};
+    use nalgebra::Vector3;
 
     // lennard-jones double loop test
     #[test]
@@ -2477,5 +2831,57 @@ mod tests {
         let t = lennard_jones_simulations::compute_temperature(&mut new_simulation_md, dof);
         info!("Final temperature={t:.3}, target={t0:.3}");
         assert!((t - t0).abs() < 5.0, "Temperature should approach target");
+    }
+
+    #[test]
+    fn exclusions_remove_intramolecular_electrostatics() {
+        use crate::molecule::molecule::System;
+
+        let mut sys = System::default();
+        sys.atoms = vec![
+            lennard_jones_simulations::Particle {
+                id: 0,
+                position: Vector3::new(0.0, 0.0, 0.0),
+                velocity: Vector3::zeros(),
+                force: Vector3::zeros(),
+                lj_parameters: lennard_jones_simulations::LJParameters {
+                    epsilon: 0.0,
+                    sigma: 0.0,
+                    number_of_atoms: 1,
+                },
+                mass: 1.0,
+                energy: 0.0,
+                atom_type: 0.0,
+                charge: 1.0,
+            },
+            lennard_jones_simulations::Particle {
+                id: 1,
+                position: Vector3::new(1.0, 0.0, 0.0),
+                velocity: Vector3::zeros(),
+                force: Vector3::zeros(),
+                lj_parameters: lennard_jones_simulations::LJParameters {
+                    epsilon: 0.0,
+                    sigma: 0.0,
+                    number_of_atoms: 1,
+                },
+                mass: 1.0,
+                energy: 0.0,
+                atom_type: 0.0,
+                charge: -1.0,
+            },
+        ];
+        let mut systems = vec![sys.clone()];
+        let e_before =
+            lennard_jones_simulations::compute_electrostatic_forces_systems(&mut systems, 10.0);
+        assert!(e_before.abs() > 1e-8);
+
+        let mut excluded = sys;
+        excluded.add_exclusion(0, 1);
+        let mut systems_excluded = vec![excluded];
+        let e_after = lennard_jones_simulations::compute_electrostatic_forces_systems(
+            &mut systems_excluded,
+            10.0,
+        );
+        assert!(e_after.abs() < 1e-12);
     }
 }

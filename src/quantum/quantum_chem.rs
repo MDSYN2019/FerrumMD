@@ -21,7 +21,9 @@ pub struct ScfResult {
 }
 
 impl ScfSystem {
-    fn sort_eigensystem(mut eig: SymmetricEigen<f64, nalgebra::Dyn>) -> SymmetricEigen<f64, nalgebra::Dyn> {
+    fn sort_eigensystem(
+        mut eig: SymmetricEigen<f64, nalgebra::Dyn>,
+    ) -> SymmetricEigen<f64, nalgebra::Dyn> {
         let n = eig.eigenvalues.len();
         let mut order: Vec<usize> = (0..n).collect();
         order.sort_by(|&a, &b| eig.eigenvalues[a].partial_cmp(&eig.eigenvalues[b]).unwrap());
