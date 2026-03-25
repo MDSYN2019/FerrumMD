@@ -54,21 +54,30 @@ fn minimize_systems(
     max_steps: usize,
     step_size: f64,
     force_tolerance: f64,
+    lj_cutoff: f64,
+    pme: PmeConfig,
 ) {
     log::info!(
-        "Starting minimization: max_steps={}, step_size={}, force_tolerance={}",
+        "Starting minimization: max_steps={}, step_size={}, force_tolerance={}, lj_cutoff={}, pme(alpha={}, real_cutoff={}, kmax={})",
         max_steps,
         step_size,
-        force_tolerance
+        force_tolerance,
+        lj_cutoff,
+        pme.alpha,
+        pme.real_cutoff,
+        pme.kmax
     );
 
     for step in 0..max_steps {
         for sys in systems.iter_mut() {
             lennard_jones_simulations::compute_all_bonded_forces_system(sys, box_length);
         }
-        lennard_jones_simulations::compute_intermolecular_forces_systems(systems, box_length);
-        let _ =
-            lennard_jones_simulations::compute_electrostatic_forces_systems(systems, box_length);
+        lennard_jones_simulations::compute_intermolecular_forces_systems_cutoff(
+            systems, box_length, lj_cutoff,
+        );
+        let _ = lennard_jones_simulations::compute_electrostatic_forces_systems_with_config(
+            systems, box_length, &pme,
+        );
 
         let mut max_force = 0.0;
         for sys in systems.iter_mut() {
@@ -82,7 +91,7 @@ fn minimize_systems(
             lennard_jones_simulations::pbc_update(&mut sys.atoms, box_length);
         }
 
-        if step == 0 || (step + 1) % 10 == 0 || step + 1 == max_steps {
+        if step == 0 || (step + 1) % 25 == 0 || step + 1 == max_steps {
             log::info!("Minimization step {:>4} | max |F| = {:.6}", step + 1, max_force);
         }
 
@@ -112,6 +121,12 @@ fn main() -> Result<(), String> {
     let minimization_steps = 200;
     let minimization_step_size = 0.0005;
     let minimization_force_tolerance = 1e-3;
+    let minimization_lj_cutoff = (0.5 * box_length).min(1.2);
+    let minimization_pme = PmeConfig {
+        alpha: 3.0,
+        real_cutoff: minimization_lj_cutoff,
+        kmax: 4,
+    };
 
     let mut systems = create_tip3p_water_box(n_side, box_length)?;
     minimize_systems(
@@ -120,6 +135,8 @@ fn main() -> Result<(), String> {
         minimization_steps,
         minimization_step_size,
         minimization_force_tolerance,
+        minimization_lj_cutoff,
+        minimization_pme,
     );
 
     let mut init_state = InitOutput::Systems(systems.clone());
