@@ -1,13 +1,13 @@
 use nalgebra::Vector3;
 use rand::Rng;
-use sang_md::PmeConfig;
 use sang_md::lennard_jones_simulations::{
     self, ConstraintMode, ConstraintOptions, InitOutput, SystemSimulationConfig,
 };
-use sang_md::molecule::io::write_gro_systems;
+use sang_md::molecule::io::{systems_to_particles_frame, write_gro_systems, write_xtc};
 use sang_md::molecule::martini;
 use sang_md::molecule::molecule::System;
 use sang_md::molecule::shake_rattle::shake_rattle;
+use sang_md::PmeConfig;
 
 fn create_tip3p_water_box(n_side: usize, box_length: f64) -> Result<Vec<System>, String> {
     let spacing = box_length / n_side as f64;
@@ -97,6 +97,7 @@ fn main() -> Result<(), String> {
     let box_length = (n_molecules / target_number_density).cbrt();
     let dt = 0.001;
     let nsteps = 20000;
+    let trajectory_stride = 100;
     let minimization_steps = 200;
     let minimization_step_size = 0.0005;
     let minimization_force_tolerance = 1e-3;
@@ -143,15 +144,24 @@ fn main() -> Result<(), String> {
         },
     };
 
-    lennard_jones_simulations::run_md_nve_systems_with_constraints_and_config(
-        &mut systems,
-        nsteps,
-        dt,
-        box_length,
-        "none",
-        Some(&constraint_options),
-        run_config,
-    );
+    let mut frames = Vec::with_capacity((nsteps as usize / trajectory_stride) + 2);
+    frames.push(systems_to_particles_frame(&systems));
+
+    for step in 0..nsteps {
+        lennard_jones_simulations::run_md_nve_systems_with_constraints_and_config(
+            &mut systems,
+            1,
+            dt,
+            box_length,
+            "none",
+            Some(&constraint_options),
+            run_config,
+        );
+
+        if (step + 1) % trajectory_stride == 0 || step + 1 == nsteps {
+            frames.push(systems_to_particles_frame(&systems));
+        }
+    }
 
     write_gro_systems(
         "tip3p_water_box.gro",
@@ -160,18 +170,19 @@ fn main() -> Result<(), String> {
         "TIP3P water box",
     )?;
 
-    //write_xtc(
-    //    "martini_water_box.xtc",
-    //    &frames,
-    //    Vector3::new(box_length, box_length, box_length),
-    //    dt as f32,
-    //)?;
+    write_xtc(
+        "tip3p_water_box.xtc",
+        &frames,
+        Vector3::new(box_length, box_length, box_length),
+        (dt * trajectory_stride as f64) as f32,
+    )?;
 
     let atom_count: usize = systems.iter().map(|system| system.atoms.len()).sum();
     println!(
-        "Wrote tip3p_water_box.gro for {} molecules ({} atoms)",
+        "Wrote tip3p_water_box.gro and tip3p_water_box.xtc for {} molecules ({} atoms), {} frames",
         systems.len(),
-        atom_count
+        atom_count,
+        frames.len()
     );
 
     Ok(())
