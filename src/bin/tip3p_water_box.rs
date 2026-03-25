@@ -1,6 +1,9 @@
 use nalgebra::Vector3;
 use rand::Rng;
-use sang_md::lennard_jones_simulations::{self, ConstraintMode, ConstraintOptions, InitOutput};
+use sang_md::PmeConfig;
+use sang_md::lennard_jones_simulations::{
+    self, ConstraintMode, ConstraintOptions, InitOutput, SystemSimulationConfig,
+};
 use sang_md::molecule::io::write_gro_systems;
 use sang_md::molecule::martini;
 use sang_md::molecule::molecule::System;
@@ -89,9 +92,11 @@ fn main() -> Result<(), String> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let n_side = 6;
-    let box_length = 18.0;
+    let target_number_density = 33.3679; // molecules / nm^3 (~1 g/cm^3 water)
+    let n_molecules = (n_side * n_side * n_side) as f64;
+    let box_length = (n_molecules / target_number_density).cbrt();
     let dt = 0.001;
-    let nsteps = 2000;
+    let nsteps = 20000;
     let minimization_steps = 200;
     let minimization_step_size = 0.0005;
     let minimization_force_tolerance = 1e-3;
@@ -126,13 +131,26 @@ fn main() -> Result<(), String> {
         max_iter: 100,
     };
 
-    lennard_jones_simulations::run_md_nve_systems_with_constraints(
+    let cutoff = (0.5 * box_length).min(1.2);
+    let run_config = SystemSimulationConfig {
+        cutoff,
+        neighbor_skin: 0.2,
+        neighbor_rebuild_interval: 10,
+        pme: PmeConfig {
+            alpha: 3.5,
+            real_cutoff: cutoff,
+            kmax: 6,
+        },
+    };
+
+    lennard_jones_simulations::run_md_nve_systems_with_constraints_and_config(
         &mut systems,
         nsteps,
         dt,
         box_length,
         "none",
         Some(&constraint_options),
+        run_config,
     );
 
     write_gro_systems(
