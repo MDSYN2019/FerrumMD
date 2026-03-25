@@ -126,7 +126,7 @@ impl Default for PmeConfig {
     fn default() -> Self {
         Self {
             alpha: 0.35,
-            real_cutoff: 9.0,
+            real_cutoff: 1.2,
             kmax: 4,
         }
     }
@@ -389,8 +389,8 @@ pub mod lennard_jones_simulations {
     impl Default for SystemSimulationConfig {
         fn default() -> Self {
             Self {
-                cutoff: 9.0,
-                neighbor_skin: 1.5,
+                cutoff: 1.2,
+                neighbor_skin: 0.2,
                 neighbor_rebuild_interval: 10,
                 pme: PmeConfig::default(),
             }
@@ -1095,7 +1095,8 @@ pub mod lennard_jones_simulations {
     }
 
     pub fn compute_intermolecular_forces_systems(systems: &mut [System], box_length: f64) -> f64 {
-        compute_intermolecular_forces_systems_cutoff(systems, box_length, 9.0)
+        let cutoff = 0.5 * box_length;
+        compute_intermolecular_forces_systems_cutoff(systems, box_length, cutoff)
     }
 
     pub fn compute_intermolecular_forces_systems_cutoff(
@@ -1146,7 +1147,8 @@ pub mod lennard_jones_simulations {
     }
 
     pub fn intermolecular_site_site_energy_systems(systems: &[System], box_length: f64) -> f64 {
-        intermolecular_site_site_energy_systems_cutoff(systems, box_length, 9.0)
+        let cutoff = 0.5 * box_length;
+        intermolecular_site_site_energy_systems_cutoff(systems, box_length, cutoff)
     }
 
     pub fn intermolecular_site_site_energy_systems_cutoff(
@@ -1863,6 +1865,100 @@ pub mod lennard_jones_simulations {
             }
         }
 
+        energy + add_electrostatic_reciprocal_systems(systems, box_length, pme, &atom_map)
+    }
+
+    fn add_electrostatic_reciprocal_systems(
+        systems: &mut [System],
+        box_length: f64,
+        pme: &PmeConfig,
+        atom_map: &[(usize, usize)],
+    ) -> f64 {
+        if atom_map.is_empty() {
+            return 0.0;
+        }
+
+        let volume = box_length.powi(3);
+        if volume <= 0.0 {
+            return 0.0;
+        }
+
+        let alpha = pme.alpha;
+        let kmax = pme.kmax;
+        let k_e = coulomb_prefactor();
+        let two_pi_over_l = 2.0 * std::f64::consts::PI / box_length;
+
+        let positions: Vec<Vector3<f64>> = atom_map
+            .iter()
+            .map(|&(sys_idx, atom_idx)| systems[sys_idx].atoms[atom_idx].position)
+            .collect();
+        let charges: Vec<f64> = atom_map
+            .iter()
+            .map(|&(sys_idx, atom_idx)| systems[sys_idx].atoms[atom_idx].charge)
+            .collect();
+
+        let mut force_updates = vec![Vector3::<f64>::zeros(); atom_map.len()];
+        let mut energy = 0.0;
+
+        for nx in -kmax..=kmax {
+            for ny in -kmax..=kmax {
+                for nz in -kmax..=kmax {
+                    if nx == 0 && ny == 0 && nz == 0 {
+                        continue;
+                    }
+
+                    let kvec = Vector3::new(
+                        nx as f64 * two_pi_over_l,
+                        ny as f64 * two_pi_over_l,
+                        nz as f64 * two_pi_over_l,
+                    );
+                    let k2 = kvec.norm_squared();
+                    if k2 <= 1e-12 {
+                        continue;
+                    }
+                    let damp = (-k2 / (4.0 * alpha * alpha)).exp();
+                    let coef_energy = (2.0 * std::f64::consts::PI * k_e / volume) * damp / k2;
+                    let coef_force = (4.0 * std::f64::consts::PI * k_e / volume) * damp / k2;
+
+                    for i in 0..atom_map.len() {
+                        if charges[i] == 0.0 {
+                            continue;
+                        }
+                        for j in (i + 1)..atom_map.len() {
+                            if charges[j] == 0.0 {
+                                continue;
+                            }
+                            let Some((_, coulomb_scale)) =
+                                lj_coulomb_scaling_for_pair(systems, atom_map, i, j)
+                            else {
+                                continue;
+                            };
+                            if coulomb_scale == 0.0 {
+                                continue;
+                            }
+
+                            let rij = positions[j] - positions[i];
+                            let phase = kvec.dot(&rij);
+                            let pair_charge = charges[i] * charges[j] * coulomb_scale;
+                            energy += 2.0 * coef_energy * pair_charge * phase.cos();
+
+                            let force_vec = coef_force * pair_charge * phase.sin() * kvec;
+                            force_updates[i] -= force_vec;
+                            force_updates[j] += force_vec;
+                        }
+                    }
+                }
+            }
+        }
+
+        let self_energy: f64 = charges.iter().map(|q| q * q).sum::<f64>()
+            * (-k_e * alpha / std::f64::consts::PI.sqrt());
+        energy += self_energy;
+
+        for (global_idx, &(sys_idx, atom_idx)) in atom_map.iter().enumerate() {
+            systems[sys_idx].atoms[atom_idx].force += force_updates[global_idx];
+        }
+
         energy
     }
 
@@ -2564,7 +2660,26 @@ pub mod lennard_jones_simulations {
         thermostat: &str,
         constraint_options: Option<&ConstraintOptions>,
     ) {
-        let config = SystemSimulationConfig::default();
+        run_md_nve_systems_with_constraints_and_config(
+            systems,
+            number_of_steps,
+            dt,
+            box_length,
+            thermostat,
+            constraint_options,
+            SystemSimulationConfig::default(),
+        );
+    }
+
+    pub fn run_md_nve_systems_with_constraints_and_config(
+        systems: &mut Vec<System>,
+        number_of_steps: i32,
+        dt: f64,
+        box_length: f64,
+        thermostat: &str,
+        constraint_options: Option<&ConstraintOptions>,
+        config: SystemSimulationConfig,
+    ) {
         let mut values: Vec<f32> = Vec::new();
         let mut total_energy = 0.0;
         let mut kinetic_energy = 0.0;
@@ -2902,7 +3017,10 @@ mod tests {
             &mut systems_excluded,
             10.0,
         );
-        assert!(e_after.abs() < 1e-12);
+        let expected_self = -138.935_457_644 * 0.35 / std::f64::consts::PI.sqrt() * 2.0;
+        assert!((e_after - expected_self).abs() < 1e-10);
+        assert!(systems_excluded[0].atoms[0].force.norm() < 1e-12);
+        assert!(systems_excluded[0].atoms[1].force.norm() < 1e-12);
     }
 
     fn test_particle(
