@@ -92,7 +92,11 @@ fn minimize_systems(
         }
 
         if step == 0 || (step + 1) % 25 == 0 || step + 1 == max_steps {
-            log::info!("Minimization step {:>4} | max |F| = {:.6}", step + 1, max_force);
+            log::info!(
+                "Minimization step {:>4} | max |F| = {:.6}",
+                step + 1,
+                max_force
+            );
         }
 
         if max_force < force_tolerance {
@@ -116,11 +120,11 @@ fn main() -> Result<(), String> {
     let n_molecules = (n_side * n_side * n_side) as f64;
     let box_length = (n_molecules / target_number_density).cbrt();
     let dt = 0.001;
-    let nsteps = 20000;
-    let trajectory_stride = 100;
-    let minimization_steps = 200;
+    let nsteps = 1000;
+    let trajectory_stride = 50;
+    let minimization_steps = 50;
     let minimization_step_size = 0.0005;
-    let minimization_force_tolerance = 1e-3;
+    let minimization_force_tolerance = 5e-3;
     let minimization_lj_cutoff = (0.5 * box_length).min(1.2);
     let minimization_pme = PmeConfig {
         alpha: 3.0,
@@ -129,6 +133,12 @@ fn main() -> Result<(), String> {
     };
 
     let mut systems = create_tip3p_water_box(n_side, box_length)?;
+    log::info!(
+        "TIP3P short run config: minimization_steps={}, production_steps={}, dt={}",
+        minimization_steps,
+        nsteps,
+        dt
+    );
     minimize_systems(
         &mut systems,
         box_length,
