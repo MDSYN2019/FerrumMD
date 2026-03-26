@@ -57,15 +57,19 @@ fn minimize_systems(
     lj_cutoff: f64,
     pme: PmeConfig,
 ) {
+    let max_displacement_nm = 0.002;
+    let max_force_for_update = 5.0e3;
     log::info!(
-        "Starting minimization: max_steps={}, step_size={}, force_tolerance={}, lj_cutoff={}, pme(alpha={}, real_cutoff={}, kmax={})",
+        "Starting minimization: max_steps={}, step_size={}, force_tolerance={}, lj_cutoff={}, pme(alpha={}, real_cutoff={}, kmax={}), max_displacement_nm={}, max_force_for_update={}",
         max_steps,
         step_size,
         force_tolerance,
         lj_cutoff,
         pme.alpha,
         pme.real_cutoff,
-        pme.kmax
+        pme.kmax,
+        max_displacement_nm,
+        max_force_for_update
     );
 
     for step in 0..max_steps {
@@ -86,7 +90,17 @@ fn minimize_systems(
                 if force_norm > max_force {
                     max_force = force_norm;
                 }
-                atom.position += (step_size / atom.mass) * atom.force;
+                let force_scale = if force_norm > max_force_for_update {
+                    max_force_for_update / force_norm
+                } else {
+                    1.0
+                };
+                let mut displacement = (step_size / atom.mass) * atom.force * force_scale;
+                let displacement_norm = displacement.norm();
+                if displacement_norm > max_displacement_nm {
+                    displacement *= max_displacement_nm / displacement_norm;
+                }
+                atom.position += displacement;
             }
             lennard_jones_simulations::pbc_update(&mut sys.atoms, box_length);
         }
@@ -185,20 +199,18 @@ fn main() -> Result<(), String> {
     let mut frames = Vec::with_capacity((nsteps as usize / trajectory_stride) + 2);
     frames.push(systems_to_particles_frame(&systems));
 
-    for step in 0..nsteps {
+    for completed_steps in (0..nsteps).step_by(trajectory_stride as usize) {
+        let steps_this_chunk = (nsteps - completed_steps).min(trajectory_stride) as i32;
         lennard_jones_simulations::run_md_nve_systems_with_constraints_and_config(
             &mut systems,
-            1,
+            steps_this_chunk,
             dt,
             box_length,
             "none",
             Some(&constraint_options),
             run_config,
         );
-
-        if (step + 1) % trajectory_stride == 0 || step + 1 == nsteps {
-            frames.push(systems_to_particles_frame(&systems));
-        }
+        frames.push(systems_to_particles_frame(&systems));
     }
 
     write_gro_systems(
