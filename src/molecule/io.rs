@@ -157,6 +157,193 @@ pub fn read_gro(path: &str) -> Result<(Vec<Particle>, Option<Vector3<f64>>), Str
     read_gro_from_str(&contents)
 }
 
+fn parse_lammps_axis_bounds(line: &str, axis: &str) -> Result<(f64, f64), String> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() < 2 {
+        return Err(format!("invalid {axis} bounds line in lammps data: {line}"));
+    }
+
+    let lo = fields[0]
+        .parse::<f64>()
+        .map_err(|e| format!("failed to parse {axis}lo bound in lammps data: {e}; line: {line}"))?;
+    let hi = fields[1]
+        .parse::<f64>()
+        .map_err(|e| format!("failed to parse {axis}hi bound in lammps data: {e}; line: {line}"))?;
+    Ok((lo, hi))
+}
+
+fn parse_lammps_atoms_line(line: &str, id: usize) -> Result<Particle, String> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() < 4 {
+        return Err(format!("invalid lammps atom line (expected x y z fields): {line}"));
+    }
+
+    // Typical "Atoms" formats are either:
+    // 1) atom-ID atom-type x y z
+    // 2) atom-ID mol-ID atom-type q x y z
+    let coordinate_start = if fields.len() >= 7 { 4 } else { fields.len() - 3 };
+    let x = fields[coordinate_start]
+        .parse::<f64>()
+        .map_err(|e| format!("failed to parse x coordinate in lammps data atom line: {e}; line: {line}"))?;
+    let y = fields[coordinate_start + 1]
+        .parse::<f64>()
+        .map_err(|e| format!("failed to parse y coordinate in lammps data atom line: {e}; line: {line}"))?;
+    let z = fields[coordinate_start + 2]
+        .parse::<f64>()
+        .map_err(|e| format!("failed to parse z coordinate in lammps data atom line: {e}; line: {line}"))?;
+
+    Ok(particle_from_coordinates(id, "X", Vector3::new(x, y, z)))
+}
+
+pub fn read_lammps_data_from_str(
+    contents: &str,
+) -> Result<(Vec<Particle>, Option<Vector3<f64>>), String> {
+    let lines: Vec<&str> = contents.lines().collect();
+
+    let mut x_bounds: Option<(f64, f64)> = None;
+    let mut y_bounds: Option<(f64, f64)> = None;
+    let mut z_bounds: Option<(f64, f64)> = None;
+
+    for line in &lines {
+        if line.contains("xlo") && line.contains("xhi") {
+            x_bounds = Some(parse_lammps_axis_bounds(line, "x")?);
+        } else if line.contains("ylo") && line.contains("yhi") {
+            y_bounds = Some(parse_lammps_axis_bounds(line, "y")?);
+        } else if line.contains("zlo") && line.contains("zhi") {
+            z_bounds = Some(parse_lammps_axis_bounds(line, "z")?);
+        }
+    }
+
+    let atoms_header_idx = lines
+        .iter()
+        .position(|line| line.trim().starts_with("Atoms"))
+        .ok_or_else(|| "failed to find 'Atoms' section in lammps data file".to_string())?;
+
+    let mut particles = Vec::new();
+    for line in lines.iter().skip(atoms_header_idx + 1) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
+            break;
+        }
+
+        let id = particles.len() + 1;
+        particles.push(parse_lammps_atoms_line(trimmed, id)?);
+    }
+
+    if particles.is_empty() {
+        return Err("lammps data file has no atoms in 'Atoms' section".to_string());
+    }
+
+    let box_dims = match (x_bounds, y_bounds, z_bounds) {
+        (Some((xlo, xhi)), Some((ylo, yhi)), Some((zlo, zhi))) => {
+            Some(Vector3::new(xhi - xlo, yhi - ylo, zhi - zlo))
+        }
+        _ => None,
+    };
+
+    Ok((particles, box_dims))
+}
+
+pub fn read_lammps_data(path: &str) -> Result<(Vec<Particle>, Option<Vector3<f64>>), String> {
+    let contents = fs::read_to_string(path)
+        .map_err(|e| format!("failed to read lammps data file at '{path}': {e}"))?;
+    read_lammps_data_from_str(&contents)
+}
+
+pub fn read_lammps_dump_from_str(
+    contents: &str,
+) -> Result<(Vec<Particle>, Option<Vector3<f64>>), String> {
+    let lines: Vec<&str> = contents.lines().collect();
+    let bounds_header_idx = lines
+        .iter()
+        .position(|line| line.trim() == "ITEM: BOX BOUNDS pp pp pp")
+        .or_else(|| {
+            lines
+                .iter()
+                .position(|line| line.trim().starts_with("ITEM: BOX BOUNDS"))
+        });
+
+    let mut box_dims = None;
+    if let Some(idx) = bounds_header_idx {
+        if lines.len() >= idx + 4 {
+            let (xlo, xhi) = parse_lammps_axis_bounds(lines[idx + 1], "x")?;
+            let (ylo, yhi) = parse_lammps_axis_bounds(lines[idx + 2], "y")?;
+            let (zlo, zhi) = parse_lammps_axis_bounds(lines[idx + 3], "z")?;
+            box_dims = Some(Vector3::new(xhi - xlo, yhi - ylo, zhi - zlo));
+        }
+    }
+
+    let atoms_header_idx = lines
+        .iter()
+        .position(|line| line.trim().starts_with("ITEM: ATOMS"))
+        .ok_or_else(|| "failed to find 'ITEM: ATOMS' section in lammps dump".to_string())?;
+
+    let header_fields: Vec<&str> = lines[atoms_header_idx]
+        .split_whitespace()
+        .skip(2)
+        .collect();
+    let x_idx = header_fields
+        .iter()
+        .position(|f| *f == "x" || *f == "xu" || *f == "xs")
+        .ok_or_else(|| "lammps dump ATOMS header missing x/xu/xs column".to_string())?;
+    let y_idx = header_fields
+        .iter()
+        .position(|f| *f == "y" || *f == "yu" || *f == "ys")
+        .ok_or_else(|| "lammps dump ATOMS header missing y/yu/ys column".to_string())?;
+    let z_idx = header_fields
+        .iter()
+        .position(|f| *f == "z" || *f == "zu" || *f == "zs")
+        .ok_or_else(|| "lammps dump ATOMS header missing z/zu/zs column".to_string())?;
+
+    let mut particles = Vec::new();
+    for line in lines.iter().skip(atoms_header_idx + 1) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("ITEM:") {
+            break;
+        }
+
+        let fields: Vec<&str> = trimmed.split_whitespace().collect();
+        let max_index = *[x_idx, y_idx, z_idx].iter().max().expect("non-empty");
+        if fields.len() <= max_index {
+            return Err(format!("invalid lammps dump atom line: {trimmed}"));
+        }
+
+        let x = fields[x_idx]
+            .parse::<f64>()
+            .map_err(|e| format!("failed to parse x in lammps dump atom line: {e}; line: {trimmed}"))?;
+        let y = fields[y_idx]
+            .parse::<f64>()
+            .map_err(|e| format!("failed to parse y in lammps dump atom line: {e}; line: {trimmed}"))?;
+        let z = fields[z_idx]
+            .parse::<f64>()
+            .map_err(|e| format!("failed to parse z in lammps dump atom line: {e}; line: {trimmed}"))?;
+
+        particles.push(particle_from_coordinates(
+            particles.len() + 1,
+            "X",
+            Vector3::new(x, y, z),
+        ));
+    }
+
+    if particles.is_empty() {
+        return Err("lammps dump has no atoms in ITEM: ATOMS section".to_string());
+    }
+
+    Ok((particles, box_dims))
+}
+
+pub fn read_lammps_dump(path: &str) -> Result<(Vec<Particle>, Option<Vector3<f64>>), String> {
+    let contents = fs::read_to_string(path)
+        .map_err(|e| format!("failed to read lammps dump file at '{path}': {e}"))?;
+    read_lammps_dump_from_str(&contents)
+}
+
 pub fn write_gro(
     path: &str,
     particles: &[Particle],
@@ -365,5 +552,60 @@ END\n";
         let _ = fs::remove_file(path);
         assert!(content.contains("WAT"));
         assert!(content.contains("1.000"));
+    }
+
+    #[test]
+    fn parses_lammps_data_atoms_and_box() {
+        let data = "LAMMPS data file\n\
+\n\
+2 atoms\n\
+\n\
+0.0 10.0 xlo xhi\n\
+0.0 20.0 ylo yhi\n\
+0.0 30.0 zlo zhi\n\
+\n\
+Atoms # atomic\n\
+\n\
+1 1 1.0 2.0 3.0\n\
+2 1 4.0 5.0 6.0\n\
+";
+
+        let (particles, box_dims) =
+            read_lammps_data_from_str(data).expect("lammps data should parse");
+        assert_eq!(particles.len(), 2);
+        assert!((particles[0].position.x - 1.0).abs() < 1e-9);
+        assert!((particles[1].position.z - 6.0).abs() < 1e-9);
+
+        let box_dims = box_dims.expect("box dims should exist");
+        assert!((box_dims.x - 10.0).abs() < 1e-9);
+        assert!((box_dims.y - 20.0).abs() < 1e-9);
+        assert!((box_dims.z - 30.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parses_lammps_dump_atoms_and_box() {
+        let dump = "ITEM: TIMESTEP\n\
+0\n\
+ITEM: NUMBER OF ATOMS\n\
+2\n\
+ITEM: BOX BOUNDS pp pp pp\n\
+0.0 8.0\n\
+0.0 9.0\n\
+0.0 10.0\n\
+ITEM: ATOMS id type x y z\n\
+1 1 0.1 0.2 0.3\n\
+2 1 0.4 0.5 0.6\n\
+";
+
+        let (particles, box_dims) =
+            read_lammps_dump_from_str(dump).expect("lammps dump should parse");
+        assert_eq!(particles.len(), 2);
+        assert!((particles[0].position.y - 0.2).abs() < 1e-9);
+        assert!((particles[1].position.x - 0.4).abs() < 1e-9);
+
+        let box_dims = box_dims.expect("box dims should exist");
+        assert!((box_dims.x - 8.0).abs() < 1e-9);
+        assert!((box_dims.y - 9.0).abs() < 1e-9);
+        assert!((box_dims.z - 10.0).abs() < 1e-9);
     }
 }
