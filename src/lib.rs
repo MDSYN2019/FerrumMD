@@ -612,6 +612,7 @@ pub mod lennard_jones_simulations {
         temp: f64,
         box_length: f64,
     ) -> () {
+        const MIN_SEPARATION: f64 = 0.35;
         let mut rng = rand::rng();
         // loop over each moleucle
 
@@ -627,14 +628,17 @@ pub mod lennard_jones_simulations {
                 }
             }
             InitOutput::Systems(systems) => {
+                let mut used_translations: Vec<Vector3<f64>> = Vec::new();
                 for sys in systems.iter_mut() {
                     // Randomize each molecule position as a rigid translation so cloned
                     // systems do not remain perfectly overlapped at initialization.
-                    let translation = Vector3::new(
-                        rng.random_range(0.0..box_length),
-                        rng.random_range(0.0..box_length),
-                        rng.random_range(0.0..box_length),
+                    let translation = sample_position_with_min_separation(
+                        &mut rng,
+                        box_length,
+                        MIN_SEPARATION,
+                        &used_translations,
                     );
+                    used_translations.push(translation);
 
                     // Each element is a System
                     // loop over each atom
@@ -675,6 +679,7 @@ pub mod lennard_jones_simulations {
 
         let mut vector_positions: Vec<Particle> = Vec::new();
         let mut vector_system_positions: Vec<System> = Vec::new();
+        let mut existing_positions: Vec<Vector3<f64>> = Vec::new();
         let mut rng = rand::rng();
         // Create the number of atoms in the system with the system as necessary
         if !use_atom {
@@ -683,11 +688,11 @@ pub mod lennard_jones_simulations {
                 // the velocity, and the LJ parameters attached to it
                 let mut particle = Particle {
                     // create position for the atom in question
-                    position: Vector3::new(
-                        // generate x y z position values using the configured box size
-                        rng.random_range(0.0..box_dim_max),
-                        rng.random_range(0.0..box_dim_max),
-                        rng.random_range(0.0..box_dim_max),
+                    position: sample_position_with_min_separation(
+                        &mut rng,
+                        box_dim_max,
+                        0.9,
+                        &existing_positions,
                     ),
 
                     // create velocity for atom in question
@@ -714,6 +719,7 @@ pub mod lennard_jones_simulations {
                 // Reset the positions to the maxwell boltzmann distibution of velocities
                 particle.maxwellboltzmannvelocity(temp, mass, v_max);
                 // push those values into the vector
+                existing_positions.push(particle.position);
                 vector_positions.push(particle); // push the newly assigned particle into the positions
             }
             Ok(InitOutput::Particles(vector_positions))
@@ -728,6 +734,35 @@ pub mod lennard_jones_simulations {
     }
 
     pub fn implement_shake() -> () {}
+
+    fn sample_position_with_min_separation(
+        rng: &mut impl Rng,
+        box_length: f64,
+        min_separation: f64,
+        existing_positions: &[Vector3<f64>],
+    ) -> Vector3<f64> {
+        let min_sep2 = min_separation * min_separation;
+        const MAX_TRIES: usize = 10_000;
+        for _ in 0..MAX_TRIES {
+            let candidate = Vector3::new(
+                rng.random_range(0.0..box_length),
+                rng.random_range(0.0..box_length),
+                rng.random_range(0.0..box_length),
+            );
+            let has_overlap = existing_positions.iter().any(|other| {
+                let dr = minimum_image_convention(candidate - *other, box_length);
+                dr.norm_squared() < min_sep2
+            });
+            if !has_overlap {
+                return candidate;
+            }
+        }
+        Vector3::new(
+            rng.random_range(0.0..box_length),
+            rng.random_range(0.0..box_length),
+            rng.random_range(0.0..box_length),
+        )
+    }
 
     //pub fn run_verlet_update_nve(state: &mut InitOutput, dt: f64, box_length: f64) -> () {
     //    /*
@@ -2966,6 +3001,29 @@ mod tests {
         let t = lennard_jones_simulations::compute_temperature(&mut new_simulation_md, dof);
         info!("Final temperature={t:.3}, target={t0:.3}");
         assert!(t.is_finite());
+    }
+
+    #[test]
+    fn random_particle_initialization_avoids_close_contacts() {
+        let state = lennard_jones_simulations::create_atoms_with_set_positions_and_velocities(
+            25, 300.0, 30.0, 10.0, 10.0, false,
+        )
+        .expect("particle initialization should succeed");
+        let lennard_jones_simulations::InitOutput::Particles(particles) = state else {
+            panic!("expected particle initialization path");
+        };
+
+        let min_distance = particles
+            .iter()
+            .enumerate()
+            .flat_map(|(i, a)| particles.iter().skip(i + 1).map(move |b| (a, b)))
+            .map(|(a, b)| (a.position - b.position).norm())
+            .fold(f64::INFINITY, f64::min);
+
+        assert!(
+            min_distance >= 0.9,
+            "minimum sampled pair distance was {min_distance:.6}"
+        );
     }
 
     #[test]
