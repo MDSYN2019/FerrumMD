@@ -129,26 +129,28 @@ fn minimize_systems(
 fn main() -> Result<(), String> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let n_side = 6;
+    // Intentionally tiny box for quick VMD sanity checks.
+    let n_side = 3;
     let target_number_density = 33.3679; // molecules / nm^3 (~1 g/cm^3 water)
     let n_molecules = (n_side * n_side * n_side) as f64;
     let box_length = (n_molecules / target_number_density).cbrt();
     let dt = 0.001;
-    let nsteps = 1000;
-    let trajectory_stride = 50;
-    let minimization_steps = 50;
-    let minimization_step_size = 0.0005;
-    let minimization_force_tolerance = 5e-3;
-    let minimization_lj_cutoff = (0.5 * box_length).min(1.2);
+    let nsteps = 120;
+    let trajectory_stride = 20;
+    let minimization_steps = 8;
+    let minimization_step_size = 0.0008;
+    let minimization_force_tolerance = 5e-2;
+    let minimization_lj_cutoff = (0.5 * box_length).min(1.0);
     let minimization_pme = PmeConfig {
         alpha: 3.0,
         real_cutoff: minimization_lj_cutoff,
-        kmax: 4,
+        kmax: 2,
     };
 
     let mut systems = create_tip3p_water_box(n_side, box_length)?;
     log::info!(
-        "TIP3P short run config: minimization_steps={}, production_steps={}, dt={}",
+        "TIP3P quick sanity config: n_side={}, minimization_steps={}, production_steps={}, dt={}",
+        n_side,
         minimization_steps,
         nsteps,
         dt
@@ -184,15 +186,15 @@ fn main() -> Result<(), String> {
         max_iter: 100,
     };
 
-    let cutoff = (0.5 * box_length).min(1.2);
+    let cutoff = (0.5 * box_length).min(1.0);
     let run_config = SystemSimulationConfig {
         cutoff,
-        neighbor_skin: 0.2,
-        neighbor_rebuild_interval: 10,
+        neighbor_skin: 0.15,
+        neighbor_rebuild_interval: 20,
         pme: PmeConfig {
             alpha: 3.5,
             real_cutoff: cutoff,
-            kmax: 6,
+            kmax: 3,
         },
     };
 
