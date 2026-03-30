@@ -536,7 +536,7 @@ pub mod lennard_jones_simulations {
             let mut rng = rand::rng();
 
             // Standard deviation based on MB distribution
-            let sigma_mb = (temp / mass).sqrt();
+            let sigma_mb = maxwell_boltzmann_sigma(temp, mass);
 
             // Create a normal distribution with mean = 0, std = sigma
             let normal = Normal::new(0.0, sigma_mb).unwrap();
@@ -610,9 +610,8 @@ pub mod lennard_jones_simulations {
     pub fn set_molecular_positions_and_velocities(
         system_mol: &mut InitOutput,
         temp: f64,
-        box_length: f64,
+        _box_length: f64,
     ) -> () {
-        const MIN_SEPARATION: f64 = 0.35;
         let mut rng = rand::rng();
         // loop over each moleucle
 
@@ -628,23 +627,10 @@ pub mod lennard_jones_simulations {
                 }
             }
             InitOutput::Systems(systems) => {
-                let mut used_translations: Vec<Vector3<f64>> = Vec::new();
                 for sys in systems.iter_mut() {
-                    // Randomize each molecule position as a rigid translation so cloned
-                    // systems do not remain perfectly overlapped at initialization.
-                    let translation = sample_position_with_min_separation(
-                        &mut rng,
-                        box_length,
-                        MIN_SEPARATION,
-                        &used_translations,
-                    );
-                    used_translations.push(translation);
-
-                    // Each element is a System
-                    // loop over each atom
+                    // Preserve caller-provided molecular coordinates and only thermalize velocities.
                     for atom in sys.atoms.iter_mut() {
-                        atom.position += translation;
-                        let sigma_mb = (temp / atom.mass).sqrt(); // 1.0 needs to be replaced with mass
+                        let sigma_mb = maxwell_boltzmann_sigma(temp, atom.mass);
                         let normal = Normal::new(0.0, sigma_mb).unwrap();
 
                         atom.velocity[0] = normal.sample(&mut rng);
@@ -654,6 +640,11 @@ pub mod lennard_jones_simulations {
                 }
             }
         }
+    }
+
+    fn maxwell_boltzmann_sigma(temp: f64, mass: f64) -> f64 {
+        const KB_KJ_PER_MOL_K: f64 = 0.008_314_462_618_153_24;
+        ((KB_KJ_PER_MOL_K * temp) / mass).sqrt()
     }
 
     pub fn create_atoms_with_set_positions_and_velocities(
