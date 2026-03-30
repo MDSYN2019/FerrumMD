@@ -811,7 +811,7 @@ dependencies = [
 
 [[package]]
 name = "sang_md"
-version = "0.1.2"
+version = "0.1.0"
 dependencies = [
  "assert-type-eq",
  "env_logger",
