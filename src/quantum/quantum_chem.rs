@@ -177,6 +177,94 @@ impl ScfSystem {
     }
 }
 
+/// Shared output object for SCF-like quantum templates.
+pub struct TemplateScfResult {
+    pub electronic_energy: f64,
+    pub total_energy: f64,
+    pub iterations: usize,
+    pub converged: bool,
+    pub details: String,
+}
+
+/// A lightweight Hartree–Fock template that reuses the existing `ScfSystem`
+/// implementation for integrals and SCF controls.
+pub struct HartreeFockTemplate {
+    pub system: ScfSystem,
+}
+
+impl HartreeFockTemplate {
+    pub fn new(system: ScfSystem) -> Self {
+        Self { system }
+    }
+
+    pub fn run_template(
+        &self,
+        nuclear_repulsion: f64,
+        max_iter: usize,
+        energy_tol: f64,
+        density_tol: f64,
+    ) -> TemplateScfResult {
+        let result = self
+            .system
+            .run_scf(nuclear_repulsion, max_iter, energy_tol, density_tol);
+
+        TemplateScfResult {
+            electronic_energy: result.electronic_energy,
+            total_energy: result.total_energy,
+            iterations: result.iterations,
+            converged: result.converged,
+            details: "HF template: closed-shell SCF using Coulomb + exchange terms".to_string(),
+        }
+    }
+}
+
+/// A starter Kohn–Sham DFT template that mirrors the HF data flow and keeps
+/// explicit placeholders for exchange-correlation pieces.
+pub struct DftTemplate {
+    pub system: ScfSystem,
+    pub xc_functional: String,
+    pub grid_points: usize,
+}
+
+impl DftTemplate {
+    pub fn new(system: ScfSystem, xc_functional: impl Into<String>, grid_points: usize) -> Self {
+        Self {
+            system,
+            xc_functional: xc_functional.into(),
+            grid_points,
+        }
+    }
+
+    /// Runs the DFT template.
+    ///
+    /// TODO:
+    /// - Add numerical integration over atom-centered grids.
+    /// - Build V_xc and E_xc from `xc_functional`.
+    /// - Replace the HF exchange term with KS exchange-correlation treatment.
+    pub fn run_template(
+        &self,
+        nuclear_repulsion: f64,
+        max_iter: usize,
+        energy_tol: f64,
+        density_tol: f64,
+    ) -> TemplateScfResult {
+        let hf_like_result = self
+            .system
+            .run_scf(nuclear_repulsion, max_iter, energy_tol, density_tol);
+
+        TemplateScfResult {
+            electronic_energy: hf_like_result.electronic_energy,
+            total_energy: hf_like_result.total_energy,
+            iterations: hf_like_result.iterations,
+            converged: false,
+            details: format!(
+                "DFT template placeholder with XC='{}' and {} grid points; replace HF exchange with V_xc",
+                self.xc_functional, self.grid_points
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,5 +305,23 @@ mod tests {
         assert!((result.electronic_energy - expected_electronic).abs() < 1e-10);
         assert!((result.total_energy - expected_electronic).abs() < 1e-10);
         assert!(result.orbital_energies[0] < result.orbital_energies[1]);
+    }
+
+    #[test]
+    fn templates_for_hf_and_dft_are_constructible() {
+        let overlap = DMatrix::from_row_slice(1, 1, &[1.0]);
+        let core_h = DMatrix::from_row_slice(1, 1, &[-1.0]);
+        let eri = vec![0.7];
+
+        let hf_system = ScfSystem::new(overlap.clone(), core_h.clone(), eri.clone(), 2);
+        let hf_template = HartreeFockTemplate::new(hf_system);
+        let hf_result = hf_template.run_template(0.0, 25, 1e-12, 1e-12);
+        assert!(hf_result.converged);
+
+        let dft_system = ScfSystem::new(overlap, core_h, eri, 2);
+        let dft_template = DftTemplate::new(dft_system, "PBE", 302);
+        let dft_result = dft_template.run_template(0.0, 25, 1e-12, 1e-12);
+        assert!(!dft_result.converged);
+        assert!(dft_result.details.contains("PBE"));
     }
 }
