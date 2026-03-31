@@ -144,6 +144,23 @@ print(sang_md_py.lj_force_scalar(1.2, 1.0, 1.0))
 
 This is intended as a starting point you can expand with trajectory stepping, system builders, and observables.
 
+## ⚙️ Force-kernel performance benchmark (SIMD + multi-threading)
+
+An explicit performance benchmark binary is provided for 1k+ particle Lennard-Jones systems:
+
+```bash
+cargo run --release --bin perf_benchmark
+```
+
+It reports:
+- Python-style scalar nested-loop baseline timing
+- Optimized SIMD + multi-threaded (std::thread) timing
+- Speedup factor (`X`x) over baseline
+
+You can also use the optimized force path directly via:
+- `sang_md::performance::compute_forces_simd_parallel`
+- `sang_md::performance::apply_forces_simd_parallel`
+
 ## 🧪 Martini coarse-grained water-box NVT example
 
 A dedicated Martini-style coarse-grained water box example is also available. It runs a single-bead solvent in an NVT-like setup using velocity-Verlet integration with a Berendsen thermostat and writes GRO/XTC outputs:
