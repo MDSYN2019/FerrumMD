@@ -135,7 +135,7 @@ fn main() -> Result<(), String> {
     let n_molecules = (n_side * n_side * n_side) as f64;
     let box_length = (n_molecules / target_number_density).cbrt();
     let dt = 0.001;
-    let nsteps = 120;
+    let nsteps = 2000;
     let trajectory_stride = 20;
     let minimization_steps = 8;
     let minimization_step_size = 0.0008;
