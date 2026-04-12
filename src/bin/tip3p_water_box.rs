@@ -1,7 +1,8 @@
 use nalgebra::Vector3;
 use rand::Rng;
+use sang_md::error::error::radial_distribution_function_particle;
 use sang_md::lennard_jones_simulations::{
-    self, ConstraintMode, ConstraintOptions, InitOutput, SystemSimulationConfig,
+    self, ConstraintMode, ConstraintOptions, InitOutput, Particle, SystemSimulationConfig,
 };
 use sang_md::molecule::io::{systems_to_particles_frame, write_gro_systems, write_xtc};
 use sang_md::molecule::martini;
@@ -126,6 +127,43 @@ fn minimize_systems(
     log::warn!("Minimization reached max steps without full convergence (max_steps={max_steps})");
 }
 
+fn oxygen_only_trajectory(frames: &[Vec<Particle>]) -> Vec<Vec<Particle>> {
+    frames
+        .iter()
+        .map(|frame| {
+            frame
+                .iter()
+                .filter(|particle| particle.mass > 12.0)
+                .cloned()
+                .collect()
+        })
+        .collect()
+}
+
+fn print_oo_rdf(frames: &[Vec<Particle>], box_length: f64) {
+    let oxygen_frames = oxygen_only_trajectory(frames);
+    let r_max = (0.5 * box_length).min(1.0);
+    let bin_width = 0.02;
+    let rdf = radial_distribution_function_particle(&oxygen_frames, r_max, box_length, bin_width);
+
+    if rdf.g.is_empty() {
+        println!("RDF analysis skipped: no valid O-only trajectory data");
+        return;
+    }
+
+    println!(
+        "Computed TIP3P O-O RDF with r_max={:.3} nm, dr={:.3} nm, bins={}",
+        r_max,
+        bin_width,
+        rdf.g.len()
+    );
+    println!("r (nm)\tg_OO(r)");
+    for (i, g_r) in rdf.g.iter().enumerate() {
+        let r_center = (i as f64 + 0.5) * bin_width;
+        println!("{:.3}\t{:.6}", r_center, g_r);
+    }
+}
+
 fn main() -> Result<(), String> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -236,6 +274,7 @@ fn main() -> Result<(), String> {
         atom_count,
         frames.len()
     );
+    print_oo_rdf(&frames, box_length);
 
     Ok(())
 }
