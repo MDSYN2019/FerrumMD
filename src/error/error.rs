@@ -8,9 +8,9 @@ it tells you how many
 use crate::lennard_jones_simulations::minimum_image_convention;
 use crate::lennard_jones_simulations::Particle;
 
-struct rdf_results {
-    hist: Vec<f64>,
-    g: Vec<f64>,
+pub struct RdfResults {
+    pub hist: Vec<f64>,
+    pub g: Vec<f64>,
 }
 
 pub fn compute_average_val(
@@ -49,13 +49,11 @@ pub fn compute_average_val(
 }
 
 pub fn radial_distribution_function_particle(
-    trajectory: Vec<Vec<Particle>>,
-    atoms: Vec<Particle>,
+    trajectory: &[Vec<Particle>],
     r_max: f64, // maximum distance to consider for the RDF
     box_length: f64,
     bin_width: f64,
-    n_frames: i64,
-) -> rdf_results {
+) -> RdfResults {
     /*
     The radial distribution function (RDF) is a measure of the probability of finding a particle
     at a certain distance from another particle, compared to the probability expected
@@ -66,13 +64,37 @@ pub fn radial_distribution_function_particle(
     distribution of particles
      */
 
+    if trajectory.is_empty() || r_max <= 0.0 || box_length <= 0.0 || bin_width <= 0.0 {
+        return RdfResults {
+            hist: Vec::new(),
+            g: Vec::new(),
+        };
+    }
+
+    let n_atoms = trajectory[0].len();
+    if n_atoms < 2 {
+        return RdfResults {
+            hist: Vec::new(),
+            g: Vec::new(),
+        };
+    }
+
+    if trajectory.iter().any(|frame| frame.len() != n_atoms) {
+        log::warn!("Trajectory contains frames with inconsistent atom counts; returning empty RDF");
+        return RdfResults {
+            hist: Vec::new(),
+            g: Vec::new(),
+        };
+    }
+
+    let n_frames = trajectory.len() as f64;
     let rdf_bins: f64 = r_max / bin_width;
     let mut histogram = vec![0.0; rdf_bins as usize]; // initialize the histogram with the number of bins
     let mut g = vec![0.0; rdf_bins as usize]; // initialize the RDF historgram with the number of bings
 
     for frame in trajectory.iter() {
-        for i in 0..atoms.len() {
-            for j in i..atoms.len() - 1 {
+        for i in 0..n_atoms {
+            for j in (i + 1)..n_atoms {
                 // compute the distance between particles i and j, taking into account the periodic boundary conditions
                 let mut dx = frame[j].position - frame[i].position;
                 // apply the minimum image convention
@@ -88,22 +110,25 @@ pub fn radial_distribution_function_particle(
         }
     }
     // normalization
-    let mut volume: f64 = box_length.powi(3);
-    let mut density: f64 = atoms.len() as f64 / volume;
+    let volume: f64 = box_length.powi(3);
+    let density: f64 = n_atoms as f64 / volume;
 
     for bin_index in 0..rdf_bins as usize {
-        let mut r_inner: f64 = bin_index as f64 * bin_width; // the inner radius of the bin
-        let mut r_outer: f64 = (bin_index as f64 + 1.0) * bin_width;
-        let mut r_mid: f64 = r_inner + 0.5 * bin_width; // the mid point of the bin
+        let r_inner: f64 = bin_index as f64 * bin_width; // the inner radius of the bin
+        let r_outer: f64 = (bin_index as f64 + 1.0) * bin_width;
 
         let shell_volume: f64 =
             (4.0 / 3.0) * std::f64::consts::PI * (r_outer.powi(3) - r_inner.powi(3));
-        let ideal_count = density * shell_volume * atoms.len() as f64;
+        let ideal_count = density * shell_volume * n_atoms as f64 * n_frames;
 
-        g[bin_index] = histogram[bin_index] / ideal_count;
+        g[bin_index] = if ideal_count > 0.0 {
+            histogram[bin_index] / ideal_count
+        } else {
+            0.0
+        };
     }
 
-    let result = rdf_results {
+    let result = RdfResults {
         hist: histogram,
         g: g,
     };
