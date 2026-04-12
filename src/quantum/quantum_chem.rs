@@ -4,6 +4,7 @@ use nalgebra::{linalg::SymmetricEigen, DMatrix};
 ///
 /// All matrices are in an AO basis and use chemist's notation for two-electron
 /// integrals: (μν|λσ).
+
 pub struct ScfSystem {
     pub overlap: DMatrix<f64>,
     pub core_hamiltonian: DMatrix<f64>,
@@ -24,7 +25,7 @@ impl ScfSystem {
     fn sort_eigensystem(
         mut eig: SymmetricEigen<f64, nalgebra::Dyn>,
     ) -> SymmetricEigen<f64, nalgebra::Dyn> {
-        let n = eig.eigenvalues.len();
+        let n = eig.eigenvalues.len(); // number of eigenvalues/eigenvectors
         let mut order: Vec<usize> = (0..n).collect();
         order.sort_by(|&a, &b| eig.eigenvalues[a].partial_cmp(&eig.eigenvalues[b]).unwrap());
 
@@ -64,6 +65,10 @@ impl ScfSystem {
     }
 
     fn eri_idx(&self, mu: usize, nu: usize, lambda: usize, sigma: usize) -> usize {
+        /*
+        The ERO indexing is based on a straightforward flattening of the 4D array of integrals
+         */
+
         (((mu * self.n_basis + nu) * self.n_basis + lambda) * self.n_basis) + sigma
     }
 
@@ -248,9 +253,9 @@ impl DftTemplate {
         energy_tol: f64,
         density_tol: f64,
     ) -> TemplateScfResult {
-        let hf_like_result = self
-            .system
-            .run_scf(nuclear_repulsion, max_iter, energy_tol, density_tol);
+        let hf_like_result =
+            self.system
+                .run_scf(nuclear_repulsion, max_iter, energy_tol, density_tol);
 
         TemplateScfResult {
             electronic_energy: hf_like_result.electronic_energy,
