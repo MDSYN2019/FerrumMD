@@ -5,6 +5,10 @@ The autocorrelation function is one of the most important statistical tools in m
 it tells you how many
 */
 
+use create::lennard_jones_simulations::Particle;
+use crate::lennard_jones_simulation::minimum_image_convention;
+
+
 pub fn compute_average_val(
     container_value: &mut Vec<f32>,
     block_steps: u64,
@@ -42,4 +46,45 @@ pub fn compute_average_val(
 
 pub fn autocorrelation_function() -> () {}
 
-pub fn radial_distribution_function() -> () {}
+pub fn radial_distribution_function_particle(
+    trajectory: Vec<Vec<Particle>>
+    atoms: Vec<Particle>,
+    r_max: f64, // maximum distance to consider for the RDF
+    box_length: f64,
+    bin_width: f64,
+    n_frames: i64,
+) -> () {
+    /*
+    The radial distribution function (RDF) is a measure of the probability of finding a particle
+    at a certain distance from another particle, compared to the probability expected
+    for a completely random distribution of particles
+     */
+
+    let rdf_bins: i64 = r_max / bin_width;
+    let mut histogram: Vec<f64> = Vec::new();
+    for frame in trajectory.iter().take(n_frames as usize) {
+	for i in 0..atoms.len() {
+	    for j in i_1..atoms.len() - 1 {
+		// compute the distance between particles i and j, taking into account the periodic boundary conditions
+		let mut dx = trajectory[frame][i].position[j] - trajectory[frame][i].position[i];
+
+		// apply the minimum image convention
+		dx = minimum_image_convention(dx, box_length);				
+		let r = dx.norm(); // compute the distance between particles i and j 
+
+		if r < r_max { // only consider distance less than r_maximum
+
+		    let bin_index = (r / bin_width) as usize;
+
+		    // append the distance to the appropriate bin in the histogram
+		    histogram[bin_index] += 2.0;
+
+		    
+		}
+		
+	    }
+
+	}
+    }
+    
+}
