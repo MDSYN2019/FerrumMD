@@ -244,3 +244,72 @@ This project includes a TIP3P-oriented water-box path, and the following milesto
 5. TIP3P protocol cleanup (equilibration/production config).
 6. Performance tuning and benchmark documentation.
 7. Validation metrics/report integration.
+
+---
+
+## 🧪 Computational Physics for Drug Discovery: high-impact features to add
+
+To support an end-to-end computational chemistry pipeline (hit finding → lead optimization), FerrumMD can be extended with the following capabilities.
+
+### 1) Free-energy platform (ABFE/RBFE)
+- Alchemical transformation engine (`λ` windows, soft-core LJ/Coulomb, decoupling/annihilation modes).
+- MBAR/BAR/TI estimators and uncertainty reporting.
+- Restraint framework for absolute binding free energy (Boresch-style + standard state corrections).
+- Replica scheduling and automatic window equilibration/convergence diagnostics.
+
+### 2) Enhanced sampling
+- Metadynamics (well-tempered + multiple walkers).
+- Umbrella sampling + WHAM analysis.
+- Adaptive biasing force / OPES-style modular bias API.
+- Collective variable library (distances, contacts, torsions, RMSD, path CVs).
+
+### 3) Protein–ligand workflow primitives
+- Receptor–ligand system builder (protein prep hooks, protonation/tautomer states, cofactors, waters).
+- Ligand parameterization adapters (GAFF/OpenFF/CGenFF workflows).
+- Pose refinement mini-pipelines (short restrained MD, sidechain relaxation, water equilibration).
+- Batch execution for congeneric series (lead optimization mode).
+
+### 4) MM/PBSA and endpoint methods
+- Trajectory post-processing for MM/PBSA and MM/GBSA.
+- Configurable dielectric models and nonpolar terms.
+- Per-residue energy decomposition and interaction hotspot reports.
+- Bootstrap confidence intervals for ranking robustness.
+
+### 5) Electrostatics and long-range accuracy
+- PME/PPPM implementation for production electrostatics.
+- Ewald parameter auto-tuning for target error.
+- Long-range LJ corrections and robust tail handling.
+- Numerical validation suite for force/energy consistency.
+
+### 6) Quantum-mechanical integrations
+- QM/MM interface layer (region definitions, link atoms, electrostatic embedding).
+- External QM backend connectors (ORCA, Psi4, xTB) via standardized input/output adapters.
+- Semiempirical fast-path for screening and DFT refinement for selected candidates.
+- Reaction-coordinate scans and constrained optimizations for mechanism hypotheses.
+
+### 7) Automation, scaling, and reproducibility
+- Workflow engine for campaign templates (equilibration, production, analysis, reporting).
+- Cloud/HPC schedulers (SLURM/Kubernetes) with restart/checkpoint resilience.
+- Artifact tracking (inputs, seeds, environment, hashes) for strict reproducibility.
+- Result database + dashboard for portfolio-level decision support.
+
+### 8) AI/ML and Frontier-Hub style integration points
+- Feature export for ML reweighting/surrogates (energies, contacts, CV traces).
+- Active-learning loop: propose compounds → simulate → retrain prioritization model.
+- Uncertainty-aware rank aggregation across physics + ML models.
+- API-first service endpoints so design teams can run workflows without MD internals expertise.
+
+### 9) Validation and governance for decision-grade predictions
+- Reference benchmark panel (public and internal protein–ligand systems).
+- Continuous calibration against experimental ΔG and rank metrics.
+- Prediction confidence policies (go/no-go thresholds by project phase).
+- Audit-ready reports for model assumptions, parameter provenance, and failure modes.
+
+### Suggested implementation order
+1. PME + nonbonded correctness hardening.
+2. ABFE/RBFE alchemical core with MBAR/BAR tooling.
+3. Enhanced sampling and CV framework.
+4. MM/PBSA post-processing.
+5. QM/MM adapters.
+6. Campaign orchestration, dashboards, and AI integration.
+
