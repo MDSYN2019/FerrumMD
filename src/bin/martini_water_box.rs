@@ -110,9 +110,11 @@ fn main() -> Result<(), String> {
     let sigma = 0.47;
     let epsilon = 0.2;
     let box_length = 8.0;
-    let dt = 0.02;
+    // A conservative CG integration step helps avoid occasional LJ blow-ups
+    // from rare close contacts in this simple demo setup.
+    let dt = 0.005;
     let nsteps = 2000;
-    let thermostat_tau = 0.05;
+    let thermostat_tau = 0.02;
 
     let mut particles =
         create_martini_water_box(n_side, box_length, target_temperature, mass, sigma, epsilon)?;
