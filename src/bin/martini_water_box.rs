@@ -1,5 +1,6 @@
 use nalgebra::Vector3;
-use rand::Rng;
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 use rand_distr::{Distribution, Normal};
 use sang_md::cell_subdivision::SimulationBox;
 use sang_md::lennard_jones_simulations::{
@@ -7,6 +8,7 @@ use sang_md::lennard_jones_simulations::{
     pbc_update, LJParameters, Particle,
 };
 use sang_md::molecule::io::{write_gro, write_xtc};
+use std::env;
 
 fn create_martini_water_box(
     n_side: usize,
@@ -15,6 +17,7 @@ fn create_martini_water_box(
     mass: f64,
     sigma: f64,
     epsilon: f64,
+    rng: &mut StdRng,
 ) -> Result<Vec<Particle>, String> {
     let n_particles = n_side * n_side * n_side;
     let spacing = box_length / n_side as f64;
@@ -22,7 +25,6 @@ fn create_martini_water_box(
     let normal = Normal::new(0.0, sigma_v)
         .map_err(|e| format!("failed to build normal distribution: {e}"))?;
 
-    let mut rng = rand::rng();
     let mut particles = Vec::with_capacity(n_particles);
 
     for ix in 0..n_side {
@@ -113,11 +115,28 @@ fn main() -> Result<(), String> {
     // A conservative CG integration step helps avoid occasional LJ blow-ups
     // from rare close contacts in this simple demo setup.
     let dt = 0.005;
-    let nsteps = 2000;
+    let nsteps_equil = 500;
+    let nsteps_prod = 1500;
     let thermostat_tau = 0.02;
+    let cell_subdivisions = 10;
+    let total_steps = nsteps_equil + nsteps_prod;
 
-    let mut particles =
-        create_martini_water_box(n_side, box_length, target_temperature, mass, sigma, epsilon)?;
+    let seed = env::var("MARTINI_SEED")
+        .ok()
+        .and_then(|raw| raw.parse::<u64>().ok())
+        .unwrap_or(20260417);
+    let mut rng = StdRng::seed_from_u64(seed);
+    log::info!("martini_water_box RNG seed={seed}");
+
+    let mut particles = create_martini_water_box(
+        n_side,
+        box_length,
+        target_temperature,
+        mass,
+        sigma,
+        epsilon,
+        &mut rng,
+    )?;
     remove_center_of_mass_drift(&mut particles);
     rescale_temperature(&mut particles, target_temperature);
 
@@ -127,14 +146,14 @@ fn main() -> Result<(), String> {
         z_dimension: box_length,
     };
 
-    let mut subcells = simulation_box.create_subcells(10);
-    simulation_box.store_atoms_in_cells_particles(&mut particles, &mut subcells, 10);
+    let mut subcells = simulation_box.create_subcells(cell_subdivisions);
+    simulation_box.store_atoms_in_cells_particles(&mut particles, &mut subcells, cell_subdivisions);
     compute_forces_particles(&mut particles, box_length, &mut subcells);
 
-    let mut frames = Vec::with_capacity((nsteps / 20) as usize + 1);
+    let mut frames = Vec::with_capacity((total_steps / 20) as usize + 1);
     frames.push(snapshot(&particles));
 
-    for step in 0..nsteps {
+    for step in 0..total_steps {
         let a_old: Vec<_> = particles.iter().map(|p| p.force / p.mass).collect();
 
         for (p, a) in particles.iter_mut().zip(a_old.iter()) {
@@ -144,8 +163,12 @@ fn main() -> Result<(), String> {
 
         pbc_update(&mut particles, box_length);
 
-        let mut subcells = simulation_box.create_subcells(10);
-        simulation_box.store_atoms_in_cells_particles(&mut particles, &mut subcells, 10);
+        let mut subcells = simulation_box.create_subcells(cell_subdivisions);
+        simulation_box.store_atoms_in_cells_particles(
+            &mut particles,
+            &mut subcells,
+            cell_subdivisions,
+        );
         compute_forces_particles(&mut particles, box_length, &mut subcells);
 
         for p in &mut particles {
@@ -153,12 +176,14 @@ fn main() -> Result<(), String> {
             p.velocity += 0.5 * a_new * dt;
         }
 
-        apply_thermostat_berendsen_particles(
-            &mut particles,
-            target_temperature,
-            thermostat_tau,
-            dt,
-        );
+        if step < nsteps_equil {
+            apply_thermostat_berendsen_particles(
+                &mut particles,
+                target_temperature,
+                thermostat_tau,
+                dt,
+            );
+        }
         if step % 50 == 0 {
             remove_center_of_mass_drift(&mut particles);
         }
@@ -166,7 +191,8 @@ fn main() -> Result<(), String> {
         if step % 100 == 0 {
             let temp =
                 compute_temperature_particles(&particles, 3 * particles.len().saturating_sub(1));
-            log::info!("step={step:4} T={temp:.2}");
+            let phase = if step < nsteps_equil { "equil" } else { "prod" };
+            log::info!("step={step:4} phase={phase} T={temp:.2}");
         }
 
         if step % 20 == 0 {
