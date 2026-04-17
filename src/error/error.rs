@@ -7,6 +7,7 @@ it tells you how many
 
 use crate::lennard_jones_simulations::minimum_image_convention;
 use crate::lennard_jones_simulations::Particle;
+use std::collections::HashMap;
 
 pub struct RdfResults {
     pub hist: Vec<f64>,
@@ -134,6 +135,59 @@ pub fn radial_distribution_function_particle(
     };
 
     result
+}
+
+pub fn mean_squared_displacement_particle(
+    trajectory: &[Vec<Particle>],
+    number_of_frames: i32,
+    box_length: f64,
+) -> Result<HashMap<i32, f64>, String> {
+    /*
+    The mean squared displacement (MSD) is a measure of the average distance that particles have moved
+     */
+    let mut msd: HashMap<i32, f64> = HashMap::new(); // initialize a hashmap to store the MSD values for different time lags (tau)
+
+    let number_of_particles: usize = trajectory[0].len(); // get the number of particles from the first frame of the trajectory
+
+    for tau in 0..number_of_frames - 1 {
+        //
+        let mut sum_squared_displacement: f64 = 0.0;
+        let mut count: i32 = 0;
+
+        for t0 in 0..number_of_frames - tau {
+            // iterate over the starting time t0 over the time lag tau
+            for i in 0..number_of_particles {
+                /*
+                We wish to store the result for different time lags (tau) in order to compute
+                the diffusion coefficient from the slop of the MSD curve at long times
+                to get the difference in the position from time 0 to time t
+                 */
+                let mut diff = trajectory[t0 as usize + tau as usize][i].position
+                    - trajectory[t0 as usize][i].position;
+                // apply the minimum image convention to account for the periodic boundary condiitons
+                diff = minimum_image_convention(diff, box_length);
+                let square_displacement = diff.norm_squared(); // compute the squared displacement for particle i at time lag tau
+                sum_squared_displacement += square_displacement; // accumulate the squared displacement for all the particles and all the starting times t0
+                count += 1;
+            }
+        }
+        // compute the average squared displacement for the time lag tau by dividing the sum of squared displacement by the total number of displacemnets (count)
+        if tau % 10 == 0 {
+            log::info!("Computes MSD for time lag tau = {tau}");
+        }
+        if count > 0 {
+            msd.insert(tau, sum_squared_displacement / count as f64);
+        } else {
+            msd.insert(tau, 0.0);
+        }
+        if msd.is_empty() {
+            return Err(
+                "Error: no valid MSD values computed; check trajectory data and parameters"
+                    .to_string(),
+            );
+        }
+    }
+    return Ok(msd);
 }
 
 pub fn autocorrelation_function() -> () {}
