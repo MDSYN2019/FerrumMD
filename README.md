@@ -115,6 +115,28 @@ Generated files:
 > - This is a coarse-grained, point-particle fluid setup (water-like in mass/density intent, not explicit 3-site/4-site water geometry).
 > - Coordinates are written in GRO/XTC-compatible units (nm in files).
 
+## 🖥️ Rust VMD-style trajectory viewer (workbench starter)
+
+A new interactive viewer binary is included as a Rust-first starting point for trajectory visualization workflows.
+It loads a `GRO` structure and optionally an `XTC` trajectory, then renders atoms in a 3D viewport with playback controls.
+
+Run it with:
+
+```bash
+cargo run --features viewer --bin vmd_viewer -- water_box.gro water_box.xtc
+```
+
+Controls:
+- `Space`: play/pause
+- `←` / `→`: step one frame
+- `↑` / `↓`: playback FPS
+- Left mouse drag: orbit camera
+- Mouse wheel: zoom
+
+This is intentionally a scaffold so you can extend it in Rust (atom coloring, bonds, selection, measure tools, rendering styles, etc.).
+
+---
+
 ## 🐍 Python interface (buildable scaffold)
 
 A minimal Python extension interface is available behind the `python` feature.
