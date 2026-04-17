@@ -37,11 +37,8 @@ fn create_martini_water_box(
                     (iz as f64 + 0.5) * spacing + rng.random_range(-jitter..jitter),
                 );
 
-                let velocity = Vector3::new(
-                    normal.sample(&mut rng),
-                    normal.sample(&mut rng),
-                    normal.sample(&mut rng),
-                );
+                let velocity =
+                    Vector3::new(normal.sample(rng), normal.sample(rng), normal.sample(rng));
 
                 particles.push(Particle {
                     id: particles.len(),
@@ -112,12 +109,13 @@ fn main() -> Result<(), String> {
     let sigma = 0.47;
     let epsilon = 0.2;
     let box_length = 8.0;
-    // A conservative CG integration step helps avoid occasional LJ blow-ups
-    // from rare close contacts in this simple demo setup.
-    let dt = 0.005;
+    // Keep the integration step small for this simple reduced-unit setup to
+    // avoid catastrophic close-contact accelerations in production.
+    let dt = 0.0002;
     let nsteps_equil = 500;
     let nsteps_prod = 1500;
-    let thermostat_tau = 0.02;
+    let equil_thermostat_tau = 0.02;
+    let prod_thermostat_tau = 0.1;
     let cell_subdivisions = 10;
     let total_steps = nsteps_equil + nsteps_prod;
 
@@ -176,14 +174,17 @@ fn main() -> Result<(), String> {
             p.velocity += 0.5 * a_new * dt;
         }
 
-        if step < nsteps_equil {
-            apply_thermostat_berendsen_particles(
-                &mut particles,
-                target_temperature,
-                thermostat_tau,
-                dt,
-            );
-        }
+        let thermostat_tau = if step < nsteps_equil {
+            equil_thermostat_tau
+        } else {
+            prod_thermostat_tau
+        };
+        apply_thermostat_berendsen_particles(
+            &mut particles,
+            target_temperature,
+            thermostat_tau,
+            dt,
+        );
         if step % 50 == 0 {
             remove_center_of_mass_drift(&mut particles);
         }
