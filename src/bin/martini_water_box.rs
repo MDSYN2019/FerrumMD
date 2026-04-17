@@ -110,8 +110,8 @@ fn main() -> Result<(), String> {
     let sigma = 0.47;
     let epsilon = 0.2;
     let box_length = 8.0;
-    let dt = 0.002;
-    let nsteps = 200;
+    let dt = 0.02;
+    let nsteps = 2000;
     let thermostat_tau = 0.05;
 
     let mut particles =
