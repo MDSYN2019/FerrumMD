@@ -21,11 +21,18 @@ parameterized = "2.1.0"
 xdrfile = "0.3.0"
 mpi = { version = "0.8", optional = true }
 pyo3 = { version = "0.22", optional = true, features = ["extension-module"] }
+macroquad = { version = "0.4", optional = true }
 
 [features]
 default = []
 mpi = ["dep:mpi"]
 python = ["dep:pyo3"]
+viewer = ["dep:macroquad"]
 
 [profile.release]
 panic = "abort"
+
+[[bin]]
+name = "vmd_viewer"
+path = "src/bin/vmd_viewer.rs"
+required-features = ["viewer"]

@@ -81,6 +81,7 @@ mod python;
 #[path = "quantum/quantum_chem.rs"]
 pub mod quantum_chemistry;
 pub mod thermostat_barostat;
+pub mod visualization;
 
 use std::collections::HashSet;
 
