@@ -16,13 +16,16 @@ fn create_martini_water_box(
     sigma: f64,
     epsilon: f64,
 ) -> Result<Vec<Particle>, String> {
-    let n_particles = n_side * n_side * n_side;
-    let spacing = box_length / n_side as f64;
-    let sigma_v = (temperature / mass).sqrt();
+    /*
+    Create a cubic box of Martini-style CG water beads arranged in a simple cubic lattice with some random jitter
+    */
+    let n_particles = n_side * n_side * n_side; // total number of particles in the box
+    let spacing = box_length / n_side as f64; //spacing between particles in the lattice
+    let sigma_v = (temperature / mass).sqrt(); // standard deviation of the velocity distribution for the maxwell boltzmann distribution
     let normal = Normal::new(0.0, sigma_v)
         .map_err(|e| format!("failed to build normal distribution: {e}"))?;
 
-    let mut rng = rand::rng();
+    let mut rng = rand::rng(); // random number generator
     let mut particles = Vec::with_capacity(n_particles);
 
     for ix in 0..n_side {
@@ -30,6 +33,7 @@ fn create_martini_water_box(
             for iz in 0..n_side {
                 let jitter = 0.05 * spacing;
                 let position = Vector3::new(
+                    // place particles in a simple cubic lattice with some random jitter to avoid perfect ordering
                     (ix as f64 + 0.5) * spacing + rng.random_range(-jitter..jitter),
                     (iy as f64 + 0.5) * spacing + rng.random_range(-jitter..jitter),
                     (iz as f64 + 0.5) * spacing + rng.random_range(-jitter..jitter),
@@ -39,7 +43,7 @@ fn create_martini_water_box(
                     normal.sample(&mut rng),
                     normal.sample(&mut rng),
                     normal.sample(&mut rng),
-                );
+                ); // assign initial velocities from a Maxwell-Boltzmann distribution corresponding to the target temperature
 
                 particles.push(Particle {
                     id: particles.len(),
@@ -55,16 +59,15 @@ fn create_martini_water_box(
                     energy: 0.0,
                     atom_type: 0.0,
                     charge: 0.0,
-                });
+                }); // create a new particle and add it it to the list
             }
         }
     }
-
     Ok(particles)
 }
 
 fn snapshot(particles: &[Particle]) -> Vec<Particle> {
-    particles.to_vec()
+    particles.to_vec() // Create a snapshot of the current state of the particles (positions, velocities, etc) for later writing to an xtc file
 }
 
 fn main() -> Result<(), String> {
@@ -78,7 +81,7 @@ fn main() -> Result<(), String> {
     let epsilon = 0.2;
     let box_length = 8.0;
     let dt = 0.002;
-    let nsteps = 200;
+    let nsteps = 2000;
     let thermostat_tau = 0.05;
 
     let mut particles =
@@ -117,6 +120,7 @@ fn main() -> Result<(), String> {
         }
 
         apply_thermostat_berendsen_particles(
+            // simple Berendsen thermostat to maintain the target temperatuer
             &mut particles,
             target_temperature,
             thermostat_tau,
@@ -148,7 +152,7 @@ fn main() -> Result<(), String> {
         dt as f32,
     )?;
 
-    println!(
+    log::info!(
         "Wrote martini_water_box.gro and martini_water_box.xtc for {} particles and {} frames",
         particles.len(),
         frames.len()
