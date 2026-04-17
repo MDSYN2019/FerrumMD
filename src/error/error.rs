@@ -144,12 +144,13 @@ pub fn mean_squared_displacement_particle(
 ) -> Result<HashMap<i32, f64>, String> {
     /*
     The mean squared displacement (MSD) is a measure of the average distance that particles have moved
+    from their initial positions over time. It is defined as the average of the squared displacements
      */
+
     let mut msd: HashMap<i32, f64> = HashMap::new(); // initialize a hashmap to store the MSD values for different time lags (tau)
-
     let number_of_particles: usize = trajectory[0].len(); // get the number of particles from the first frame of the trajectory
-
     for tau in 0..number_of_frames - 1 {
+        // iterate over the time lags (tau) from 0 to the total number of frames minus 1
         //
         let mut sum_squared_displacement: f64 = 0.0;
         let mut count: i32 = 0;
