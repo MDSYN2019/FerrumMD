@@ -67,6 +67,39 @@ fn snapshot(particles: &[Particle]) -> Vec<Particle> {
     particles.to_vec()
 }
 
+fn remove_center_of_mass_drift(particles: &mut [Particle]) {
+    let total_mass: f64 = particles.iter().map(|p| p.mass).sum();
+    if total_mass <= 0.0 {
+        return;
+    }
+
+    let com_velocity = particles
+        .iter()
+        .fold(Vector3::zeros(), |acc, p| acc + p.velocity * p.mass)
+        / total_mass;
+
+    for particle in particles.iter_mut() {
+        particle.velocity -= com_velocity;
+    }
+}
+
+fn rescale_temperature(particles: &mut [Particle], target_temperature: f64) {
+    let dof = 3 * particles.len().saturating_sub(1);
+    if dof == 0 {
+        return;
+    }
+
+    let current_temperature = compute_temperature_particles(particles, dof);
+    if current_temperature <= f64::EPSILON {
+        return;
+    }
+
+    let scale = (target_temperature / current_temperature).sqrt();
+    for particle in particles.iter_mut() {
+        particle.velocity *= scale;
+    }
+}
+
 fn main() -> Result<(), String> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -83,6 +116,8 @@ fn main() -> Result<(), String> {
 
     let mut particles =
         create_martini_water_box(n_side, box_length, target_temperature, mass, sigma, epsilon)?;
+    remove_center_of_mass_drift(&mut particles);
+    rescale_temperature(&mut particles, target_temperature);
 
     let simulation_box = SimulationBox {
         x_dimension: box_length,
@@ -122,6 +157,9 @@ fn main() -> Result<(), String> {
             thermostat_tau,
             dt,
         );
+        if step % 50 == 0 {
+            remove_center_of_mass_drift(&mut particles);
+        }
 
         if step % 100 == 0 {
             let temp =
