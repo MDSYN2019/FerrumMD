@@ -99,6 +99,71 @@ fn rescale_temperature(particles: &mut [Particle], target_temperature: f64) {
     }
 }
 
+fn minimize_particles(
+    particles: &mut Vec<Particle>,
+    simulation_box: &SimulationBox,
+    box_length: f64,
+    cell_subdivisions: usize,
+    max_steps: usize,
+    step_size: f64,
+    force_tolerance: f64,
+) {
+    let max_displacement = 0.002;
+    let max_force_for_update = 5.0e3;
+    log::info!(
+        "Starting minimization: max_steps={}, step_size={}, force_tolerance={}",
+        max_steps,
+        step_size,
+        force_tolerance
+    );
+
+    for step in 0..max_steps {
+        let mut subcells = simulation_box.create_subcells(cell_subdivisions);
+        simulation_box.store_atoms_in_cells_particles(particles, &mut subcells, cell_subdivisions);
+        compute_forces_particles(particles, box_length, &mut subcells);
+
+        let mut max_force = 0.0;
+        for p in particles.iter_mut() {
+            let force_norm = p.force.norm();
+            if force_norm > max_force {
+                max_force = force_norm;
+            }
+
+            let force_scale = if force_norm > max_force_for_update {
+                max_force_for_update / force_norm
+            } else {
+                1.0
+            };
+            let mut displacement = step_size * p.force * force_scale;
+            let displacement_norm = displacement.norm();
+            if displacement_norm > max_displacement {
+                displacement *= max_displacement / displacement_norm;
+            }
+            p.position += displacement;
+        }
+
+        pbc_update(particles, box_length);
+
+        if step == 0 || (step + 1) % 25 == 0 || step + 1 == max_steps {
+            log::info!(
+                "Minimization step {:>4} | max |F| = {:.6}",
+                step + 1,
+                max_force
+            );
+        }
+        if max_force < force_tolerance {
+            log::info!(
+                "Minimization converged in {} steps (max |F| = {:.6})",
+                step + 1,
+                max_force
+            );
+            return;
+        }
+    }
+
+    log::warn!("Minimization reached max steps without full convergence (max_steps={max_steps})");
+}
+
 fn main() -> Result<(), String> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -109,13 +174,16 @@ fn main() -> Result<(), String> {
     let sigma = 0.47;
     let epsilon = 0.2;
     let box_length = 8.0;
-    // Keep the integration step small for this simple reduced-unit setup to
-    // avoid catastrophic close-contact accelerations in production.
-    let dt = 0.0002;
+    // Use a conservative equilibration step, then a larger production step.
+    let dt_equil = 0.0002;
+    let dt_prod = 0.0005;
     let nsteps_equil = 500;
     let nsteps_prod = 1500;
     let equil_thermostat_tau = 0.02;
     let prod_thermostat_tau = 0.1;
+    let minimization_steps = 100;
+    let minimization_step_size = 1.0e-5;
+    let minimization_force_tolerance = 5e-2;
     let cell_subdivisions = 10;
     let total_steps = nsteps_equil + nsteps_prod;
 
@@ -143,6 +211,19 @@ fn main() -> Result<(), String> {
         y_dimension: box_length,
         z_dimension: box_length,
     };
+    minimize_particles(
+        &mut particles,
+        &simulation_box,
+        box_length,
+        cell_subdivisions,
+        minimization_steps,
+        minimization_step_size,
+        minimization_force_tolerance,
+    );
+    for p in particles.iter_mut() {
+        p.velocity = Vector3::zeros();
+    }
+    rescale_temperature(&mut particles, target_temperature);
 
     let mut subcells = simulation_box.create_subcells(cell_subdivisions);
     simulation_box.store_atoms_in_cells_particles(&mut particles, &mut subcells, cell_subdivisions);
@@ -152,6 +233,11 @@ fn main() -> Result<(), String> {
     frames.push(snapshot(&particles));
 
     for step in 0..total_steps {
+        let dt = if step < nsteps_equil {
+            dt_equil
+        } else {
+            dt_prod
+        };
         let a_old: Vec<_> = particles.iter().map(|p| p.force / p.mass).collect();
 
         for (p, a) in particles.iter_mut().zip(a_old.iter()) {
@@ -212,7 +298,7 @@ fn main() -> Result<(), String> {
         "martini_water_box.xtc",
         &frames,
         Vector3::new(box_length, box_length, box_length),
-        dt as f32,
+        dt_equil as f32,
     )?;
 
     println!(
