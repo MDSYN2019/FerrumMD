@@ -269,6 +269,50 @@ This project includes a TIP3P-oriented water-box path, and the following milesto
 
 ---
 
+## 🚀 Proposed differentiating feature: Adaptive Free-Energy Workflow Engine (AFE)
+
+To make FerrumMD useful in its own right (rather than “just another MD engine”),
+the next major feature should be an integrated **Adaptive Free-Energy Workflow Engine**:
+
+- **Decision-oriented output:** return ranked ΔG/PMF results with uncertainty bars, not just trajectories.
+- **End-to-end workflow:** setup → run → analyze → report in one reproducible pipeline.
+- **Adaptive sampling loop:** spend additional simulation budget only where uncertainty is highest.
+
+### Why this direction
+
+FerrumMD already has key foundations:
+
+- Parsing and conversion paths for common MD ecosystems (GRO/PDB/LAMMPS, Martini/CHARMM).
+- Existing Jarzynski free-energy estimators and binning utilities.
+- Ongoing force-field and water-fidelity roadmap work.
+
+Together, these make FerrumMD well-positioned to become a practical
+**free-energy decision engine** instead of a feature-by-feature clone.
+
+### Suggested phased implementation
+
+1. **MVP workflow command** (`ferrummd fe run`)
+   - Read a single config file.
+   - Run a canonical free-energy protocol.
+   - Emit JSON/CSV outputs with metadata and seeds for reproducibility.
+
+2. **Uncertainty-aware convergence**
+   - Compute confidence intervals per window/bin.
+   - Auto-stop when target uncertainty is achieved.
+
+3. **Adaptive budget allocator**
+   - Reallocate additional trajectories/windows where variance is largest.
+   - Produce a final confidence-weighted ranking report.
+
+### Practical impact
+
+This would give FerrumMD a clear product identity:
+
+> *“An MD engine that tells you what to simulate next and when you have enough data
+> to make a thermodynamic decision.”*
+
+---
+
 ## 🧪 Computational Physics for Drug Discovery: high-impact features to add
 
 To support an end-to-end computational chemistry pipeline (hit finding → lead optimization), FerrumMD can be extended with the following capabilities.
@@ -334,4 +378,3 @@ To support an end-to-end computational chemistry pipeline (hit finding → lead 
 4. MM/PBSA post-processing.
 5. QM/MM adapters.
 6. Campaign orchestration, dashboards, and AI integration.
-
