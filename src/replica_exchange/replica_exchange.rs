@@ -1,3 +1,7 @@
+use crate::lennard_jones_simulations::InitOutput;
+use crate::lennard_jones_simulations::Particle; // import the particle struct
+use crate::molecule::molecule::System; // import the system struct // input the init struct
+
 pub struct LambdaState {
     pub elec: f64,
     pub vdw: f64,
@@ -23,3 +27,19 @@ pub trait Hamiltonian {
     fn du_dlambda(&self, state: &SystemState, lambda: &LambdaState) -> LambdaDerivs;
     fn components(&self, state: &SystemState, lambda: &LambdaState) -> EnergyBreakdown;
 }
+
+pub struct Replica {
+    // represents a single replica in the exchange simulation
+    pub id: usize,
+    pub temperature: f64,
+    pub state: InitOutput,
+    pub potential_energy: f64,
+    pub accepted_exchange: usize,
+    pub attempted_exchange: usize,
+}
+
+//pub struct SystemState {
+//    pub positions: Vec<Vec3>,
+//    pub velocitirs: Vec<Vec3>,
+//    pub forces: Vec<Vec3>,
+//}
