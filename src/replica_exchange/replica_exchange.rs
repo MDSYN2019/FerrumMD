@@ -1,3 +1,4 @@
+use std::cmp::min;
 use crate::lennard_jones_simulations::InitOutput;
 use crate::lennard_jones_simulations::Particle; // import the particle struct
 use crate::molecule::molecule::System; // import the system struct // input the init struct
@@ -52,19 +53,16 @@ pub mod replica_exchange {
     }
     
     pub fn exchange_probability(replica_1 : &mut Replica, replica_2; &mut Replica) -> () {
-	k_B = 1.380649e-23; // Boltzmann constant in J/K
+	k_B = 1.380649e-23; // Boltzmann constant in J/K - this needs to be placed in more appropriate place 
+
 	beta_1 = 1.0 / (replica_1.temperature);
 	beta_2 = 1.0 / (replica_2.temperature);
-
-
+	
 	let u_1 = replica1.potential_energy;
 	let u_2 = replica2.potential_energy;
-
-
-	let exponenet = (beta_2 - beta_1) * (u_1 - u_2);
-
+	let exponent = (beta_2 - beta_1) * (u_1 - u_2);
 	// TODO - return the min of 1 and the exponent 
-	
+	min(1.0, exponent.exp())
     }
 }
 
