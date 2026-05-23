@@ -49,7 +49,16 @@ pub mod replica_exchange {
     // methods for the replica, such as updating state, calculating energy
     pub fn attempt_exchange_particles_temperature(replica_1 : &mut Replica, replica_2; &mut Replica) -> () {
 	replica_1.attempted_exchange += 1;
-	replice_2.attempted_exchange += 2;	
+	replica_2.attempted_exchange += 2;
+
+	let prob = exchange_probability(replica_1, replica_2);
+
+
+	if rand::random::<f64>() < prob {
+	    // exchange the states of the replicas
+
+	    // TODO - swapping the states
+	}
     }
     
     pub fn exchange_probability(replica_1 : &mut Replica, replica_2; &mut Replica) -> () {
