@@ -756,88 +756,10 @@ pub mod lennard_jones_simulations {
         )
     }
 
-    //pub fn run_verlet_update_nve(state: &mut InitOutput, dt: f64, box_length: f64) -> () {
-    //    /*
-    //    Update the position and velocity of the particle using the verlet scheme
-    //     */
-    //    match state {
-    //        InitOutput::Particles(particles) => {
-    //            for particle in particles.iter_mut() {
-    //                particle.update_position_verlet(dt);
-    //            }
-    //
-    //            pbc_update(particles, box_length);
-    //
-    //            let simulation_box = cell_subdivision::SimulationBox {
-    //                x_dimension: box_length,
-    //                y_dimension: box_length,
-    //                z_dimension: box_length,
-    //            };
-    //
-    //            // Create the subcells - here we have used a subdivision of 10 for the cells
-    //            let mut subcells = simulation_box.create_subcells(10);
-    //
-    //            // Store the coordinates in cells
-    //            simulation_box.store_atoms_in_cells_particles(particles, &mut subcells, 10);
-    //            compute_forces_particles(particles, box_length, &mut subcells);
-    //
-    //            for particle in particles.iter_mut() {
-    //                println!(
-    //                    "The original position and velocity is {:?} and {:?} ",
-    //                    particle.position, particle.velocity
-    //                );
-    //                let a_new = particle.force / particle.mass;
-    //                particle.update_velocity_verlet(a_new, dt);
-    //
-    //                println!(
-    //                    "After a iteration step, the position and velocity is {:?} and {:?} ",
-    //                    particle.position, particle.velocity
-    //                );
-    //            }
-    //        }
-    //
-    //        // for each 'system' - actual molecule in the simulation
-    //        InitOutput::Systems(systems) => {
-    //            for sys in systems.iter_mut() {
-    //                for s in sys.atoms.iter_mut() {
-    //                    // this is a vector of particles
-    //                    println!(
-    //                        "The original position and velocity is {:?} and {:?} for the system",
-    //                        s.position, s.velocity
-    //                    );
-    //                    s.update_position_verlet(dt);
-    //                }
-    //                pbc_update(&mut sys.atoms, box_length);
-    //            }
-    //
-    //            let simulation_box = cell_subdivision::SimulationBox {
-    //                x_dimension: box_length,
-    //                y_dimension: box_length,
-    //                z_dimension: box_length,
-    //            };
-    //
-    //            // Create the subcells - here we have used a subdivision of 10 for the cells
-    //            let mut subcells = simulation_box.create_subcells(10);
-    //            // Store the coordinates in cells
-    //            simulation_box.store_atoms_in_cells_systems(systems, &mut subcells, 10);
-    //
-    //            // update the velocity
-    //            for sys in systems.iter_mut() {
-    //                for s in sys.atoms.iter_mut() {
-    //                    let a_new = s.force / s.mass; // compu
-    //                    s.update_velocity_verlet(a_new, dt);
-    //
-    //                    println!(
-    //                        "After a iteration step, the position and velocity is {:?} and {:?} ",
-    //                        s.position, s.velocity
-    //                    );
-    //                }
-    //            }
-    //        }
-    //    }
-    //}
-
     pub fn apply_bond_force(particles: &mut [Particle], b: &Bond, box_length: f64) -> f64 {
+        /*
+        Compute the bond force between two atoms and update the forces on the particles accordingly
+         */
         let rij = particles[b.atom1].position - particles[b.atom2].position;
         let rij_mic = minimum_image_convention(rij, box_length);
         let r = safe_norm(rij_mic.norm());
@@ -852,11 +774,13 @@ pub mod lennard_jones_simulations {
     }
 
     pub fn compute_pair_forces_vector(dr: Vec3, r2: f64, sigma: f64, epsilon: f64) -> Vec3 {
+        /*
+        Compute the pairwise Lennard-Jones force vector between two particles given the displacement vector 'dr'
+            */
         if r2 == 0.0 {
             return Vec3::zero();
         }
         let r = r2.sqrt();
-        // make sure the mixing rules are correct
         let f_mag = lennard_jones_force_scalar(r, sigma, epsilon);
         let f_vec = (dr / r) * f_mag; // along r-hat
         f_vec
@@ -1263,9 +1187,6 @@ pub mod lennard_jones_simulations {
         for a in atoms.iter_mut() {
             a.force = Vector3::zeros();
         }
-        // compute the intermolecular forces - TODO - tbis should omitt
-        // intramolecular forces
-
         apply_bonded_forces_and_energy(atoms, bonds, box_length)
     }
 
