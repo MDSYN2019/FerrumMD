@@ -16,63 +16,6 @@ use std::collections::{HashMap, HashSet};
 
 //
 
-#[derive(Clone, Debug)]
-pub struct LJParameters {
-    // lennard jones parameters and the number of atoms that we have of that parameter
-    pub epsilon: f64,
-    pub sigma: f64,
-    pub number_of_atoms: i32,
-}
-
-#[derive(Clone, Debug)]
-/// Particle state in explicit MD units.
-///
-/// - `position`: nm
-/// - `velocity`: nm/ps
-/// - `force`: kJ/(mol·nm)
-/// - `mass`: amu
-/// - `charge`: elementary charge (e)
-/// - `energy`: kJ/mol
-pub struct Particle {
-    pub id: usize,
-    pub position: Vector3<f64>,
-    pub velocity: Vector3<f64>,
-    pub force: Vector3<f64>,
-    pub lj_parameters: LJParameters,
-    pub mass: f64,
-    pub energy: f64,
-    pub atom_type: f64,
-    pub charge: f64,
-}
-
-impl Particle {
-    pub fn distance(&self, other: &Particle) -> f64 {
-        // Compute the distance between two particles
-        (self.position - other.position).norm()
-    }
-
-    pub fn maxwellboltzmannvelocity(&mut self, temp: f64, mass: f64, _v_max: f64) {
-        let mut rng = rand::rng();
-        // Standard deviation based on MB distribution
-        let sigma_mb = maxwell_boltzmann_sigma(temp, mass);
-        // Create a normal distribution with mean = 0, std = sigma
-        let normal = Normal::new(0.0, sigma_mb).unwrap();
-        // Assign each velocity component independently
-        self.velocity[0] = normal.sample(&mut rng);
-        self.velocity[1] = normal.sample(&mut rng);
-        self.velocity[2] = normal.sample(&mut rng);
-        debug!("Assigned Maxwell-Boltzmann velocity: {:?}", self.velocity);
-    }
-
-    fn update_position_verlet(&mut self, dt: f64) -> () {
-        self.position += self.velocity * dt; //+ 0.5 * a * dt * dt;
-    }
-
-    fn update_velocity_verlet(&mut self, accelerations: Vector3<f64>, dt: f64) {
-        self.velocity += 0.5 * accelerations * dt;
-    }
-}
-
 #[derive(Copy, Clone)]
 pub struct SimpleBond {
     pub i: usize,
