@@ -512,10 +512,6 @@ fn sample_position_with_min_separation(
 //                for s in sys.atoms.iter_mut() {
 //                    let a_new = s.force / s.mass; // compu
 //                    s.update_velocity_verlet(a_new, dt);
-//<<<<<<< codex/merge-rust-files-into-directory-n8v43r
-253
- 
-
 //                    println!(
 //                        "After a iteration step, the position and velocity is {:?} and {:?} ",
 //                        s.position, s.velocity
