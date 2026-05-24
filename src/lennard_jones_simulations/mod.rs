@@ -236,7 +236,7 @@ impl Particle {
         debug!("Assigned Maxwell-Boltzmann velocity: {:?}", self.velocity);
     }
 
-    fn update_position_verlet(&mut self, dt: f64) -> () {
+    pub fn update_position_verlet(&mut self, dt: f64) -> () {
         /*
         Verlet scheme to change the position
         Use the verlet scheme to change the velocity
@@ -245,7 +245,7 @@ impl Particle {
         self.position += self.velocity * dt; //+ 0.5 * a * dt * dt;
     }
 
-    fn update_velocity_verlet(&mut self, accelerations: Vector3<f64>, dt: f64) {
+    pub fn update_velocity_verlet(&mut self, accelerations: Vector3<f64>, dt: f64) {
         /*
         Verlet scheme to update the velocity
          */
