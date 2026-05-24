@@ -236,7 +236,7 @@ impl Particle {
         debug!("Assigned Maxwell-Boltzmann velocity: {:?}", self.velocity);
     }
 
-    pub fn update_position_verlet(&mut self, dt: f64) -> () {
+    fn update_position_verlet(&mut self, dt: f64) -> () {
         /*
         Verlet scheme to change the position
         Use the verlet scheme to change the velocity
@@ -245,7 +245,7 @@ impl Particle {
         self.position += self.velocity * dt; //+ 0.5 * a * dt * dt;
     }
 
-    pub fn update_velocity_verlet(&mut self, accelerations: Vector3<f64>, dt: f64) {
+    fn update_velocity_verlet(&mut self, accelerations: Vector3<f64>, dt: f64) {
         /*
         Verlet scheme to update the velocity
          */
@@ -512,7 +512,10 @@ fn sample_position_with_min_separation(
 //                for s in sys.atoms.iter_mut() {
 //                    let a_new = s.force / s.mass; // compu
 //                    s.update_velocity_verlet(a_new, dt);
-//
+//<<<<<<< codex/merge-rust-files-into-directory-n8v43r
+253
+ 
+
 //                    println!(
 //                        "After a iteration step, the position and velocity is {:?} and {:?} ",
 //                        s.position, s.velocity
