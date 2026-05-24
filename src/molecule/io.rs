@@ -175,22 +175,28 @@ fn parse_lammps_axis_bounds(line: &str, axis: &str) -> Result<(f64, f64), String
 fn parse_lammps_atoms_line(line: &str, id: usize) -> Result<Particle, String> {
     let fields: Vec<&str> = line.split_whitespace().collect();
     if fields.len() < 4 {
-        return Err(format!("invalid lammps atom line (expected x y z fields): {line}"));
+        return Err(format!(
+            "invalid lammps atom line (expected x y z fields): {line}"
+        ));
     }
 
     // Typical "Atoms" formats are either:
     // 1) atom-ID atom-type x y z
     // 2) atom-ID mol-ID atom-type q x y z
-    let coordinate_start = if fields.len() >= 7 { 4 } else { fields.len() - 3 };
-    let x = fields[coordinate_start]
-        .parse::<f64>()
-        .map_err(|e| format!("failed to parse x coordinate in lammps data atom line: {e}; line: {line}"))?;
-    let y = fields[coordinate_start + 1]
-        .parse::<f64>()
-        .map_err(|e| format!("failed to parse y coordinate in lammps data atom line: {e}; line: {line}"))?;
-    let z = fields[coordinate_start + 2]
-        .parse::<f64>()
-        .map_err(|e| format!("failed to parse z coordinate in lammps data atom line: {e}; line: {line}"))?;
+    let coordinate_start = if fields.len() >= 7 {
+        4
+    } else {
+        fields.len() - 3
+    };
+    let x = fields[coordinate_start].parse::<f64>().map_err(|e| {
+        format!("failed to parse x coordinate in lammps data atom line: {e}; line: {line}")
+    })?;
+    let y = fields[coordinate_start + 1].parse::<f64>().map_err(|e| {
+        format!("failed to parse y coordinate in lammps data atom line: {e}; line: {line}")
+    })?;
+    let z = fields[coordinate_start + 2].parse::<f64>().map_err(|e| {
+        format!("failed to parse z coordinate in lammps data atom line: {e}; line: {line}")
+    })?;
 
     Ok(particle_from_coordinates(id, "X", Vector3::new(x, y, z)))
 }
@@ -225,7 +231,11 @@ pub fn read_lammps_data_from_str(
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        if trimmed.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
+        if trimmed
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
+        {
             break;
         }
 
@@ -281,10 +291,7 @@ pub fn read_lammps_dump_from_str(
         .position(|line| line.trim().starts_with("ITEM: ATOMS"))
         .ok_or_else(|| "failed to find 'ITEM: ATOMS' section in lammps dump".to_string())?;
 
-    let header_fields: Vec<&str> = lines[atoms_header_idx]
-        .split_whitespace()
-        .skip(2)
-        .collect();
+    let header_fields: Vec<&str> = lines[atoms_header_idx].split_whitespace().skip(2).collect();
     let x_idx = header_fields
         .iter()
         .position(|f| *f == "x" || *f == "xu" || *f == "xs")
@@ -314,15 +321,15 @@ pub fn read_lammps_dump_from_str(
             return Err(format!("invalid lammps dump atom line: {trimmed}"));
         }
 
-        let x = fields[x_idx]
-            .parse::<f64>()
-            .map_err(|e| format!("failed to parse x in lammps dump atom line: {e}; line: {trimmed}"))?;
-        let y = fields[y_idx]
-            .parse::<f64>()
-            .map_err(|e| format!("failed to parse y in lammps dump atom line: {e}; line: {trimmed}"))?;
-        let z = fields[z_idx]
-            .parse::<f64>()
-            .map_err(|e| format!("failed to parse z in lammps dump atom line: {e}; line: {trimmed}"))?;
+        let x = fields[x_idx].parse::<f64>().map_err(|e| {
+            format!("failed to parse x in lammps dump atom line: {e}; line: {trimmed}")
+        })?;
+        let y = fields[y_idx].parse::<f64>().map_err(|e| {
+            format!("failed to parse y in lammps dump atom line: {e}; line: {trimmed}")
+        })?;
+        let z = fields[z_idx].parse::<f64>().map_err(|e| {
+            format!("failed to parse z in lammps dump atom line: {e}; line: {trimmed}")
+        })?;
 
         particles.push(particle_from_coordinates(
             particles.len() + 1,
