@@ -1,0 +1,150 @@
+\documentclass[aspectratio=169]{beamer}
+\usetheme{Madrid}
+\usecolortheme{seagull}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{booktabs}
+
+\title{FerrumMD: Molecular Dynamics in Rust}
+\subtitle{Main components for Rust developers new to MD}
+\author{FerrumMD project overview}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{Why this project matters}
+\begin{itemize}
+  \item \textbf{Goal:} build an MD engine with Rust's safety + performance model.
+  \item \textbf{Audience bridge:} map familiar systems ideas (data layout, kernels, parallelism) to simulation workflows.
+  \item \textbf{Scope today:} short-range interactions, molecular topologies, integrators, thermodynamic controls, and I/O.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{MD in one minute}
+\begin{itemize}
+  \item MD evolves particle positions/velocities by integrating Newton's equations.
+  \item Core loop per step:
+  \begin{enumerate}
+    \item compute forces from current geometry,
+    \item update positions/velocities,
+    \item apply boundary conditions and controls (thermostat/barostat),
+    \item report observables and save trajectory.
+  \end{enumerate}
+  \item Think of it as a repeated \texttt{state -> forces -> state'} transform with strict numerical constraints.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{High-level FerrumMD architecture}
+\begin{block}{Data and state}
+\texttt{state}, \texttt{molecule}, \texttt{parameters}, \texttt{cell}, \texttt{cell\_subdivision}
+\end{block}
+\begin{block}{Physics kernels}
+\texttt{lennard\_jones}, bonded interactions, electrostatics roadmap, free-energy and quantum modules
+\end{block}
+\begin{block}{Control and workflows}
+\texttt{ensembles} (NVE/NVT/NPT), \texttt{thermostat\_barostat}, minimization, replica exchange
+\end{block}
+\begin{block}{Interfaces}
+CLI binaries, GRO/XTC trajectory output, optional viewer feature, optional Python + MPI features
+\end{block}
+\end{frame}
+
+\begin{frame}{Core simulation state (Rust view)}
+\begin{itemize}
+  \item Struct-based system representation for particles, molecules, box, and parameters.
+  \item Explicit unit convention (nm, ps, amu, kJ/mol) avoids hidden conversion bugs.
+  \item Rust typing helps separate concerns:
+  \begin{itemize}
+    \item immutable parameter sets,
+    \item mutable evolving state,
+    \item module boundaries for force kernels and integration.
+  \end{itemize}
+  \item Result: easier reasoning about correctness and reproducibility.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Force models implemented}
+\begin{columns}[T]
+\column{0.52\textwidth}
+\textbf{Nonbonded}
+\begin{itemize}
+  \item Lennard--Jones pair interaction
+  \item Minimum-image convention with periodic boundary conditions
+  \item Cell subdivision module for scaling pair computations
+\end{itemize}
+
+\column{0.45\textwidth}
+\textbf{Bonded}
+\begin{itemize}
+  \item Harmonic bond forces
+  \item Support for small molecular systems (e.g., H$_2$)
+  \item Topology readers for Martini/CHARMM-style inputs
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Time integration and thermodynamic control}
+\begin{itemize}
+  \item Velocity-Verlet integrator as the default engine.
+  \item Ensemble support:
+  \begin{itemize}
+    \item NVE (energy-conserving baseline),
+    \item pseudo-NVT/NVT with thermostats,
+    \item NPT path with isotropic barostat support.
+  \end{itemize}
+  \item Thermostats implemented: Berendsen and Nose--Hoover.
+  \item Initialization: Maxwell--Boltzmann velocity sampling.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{I/O and ecosystem interoperability}
+\begin{itemize}
+  \item Reads molecular inputs: PDB, GRO, LAMMPS data/dump.
+  \item Force-field conversion helpers: Martini and CHARMM parsers.
+  \item Writes GRO/XTC outputs for external visualization (e.g., VMD).
+  \item Includes a Rust-native viewer scaffold (feature-gated) for extension in pure Rust.
+  \item Python bindings scaffold and MPI-enabled path for integration and parallel demos.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Why Rust is interesting here}
+\begin{itemize}
+  \item \textbf{Safety:} ownership/borrowing reduces hidden aliasing in mutable simulation state.
+  \item \textbf{Performance:} predictable data-oriented code, low abstraction penalty.
+  \item \textbf{Composability:} feature flags (MPI/viewer/python) keep core minimal.
+  \item \textbf{Reliability culture:} strong testing and explicit errors match scientific reproducibility goals.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Roadmap and open opportunities}
+\begin{itemize}
+  \item Rigid-water constraints (SETTLE/SHAKE-RATTLE path).
+  \item Topology-correct nonbonded exclusions/pairs.
+  \item Electrostatics and units audit for production TIP3P fidelity.
+  \item Possible Rust-focused contributions:
+  \begin{itemize}
+    \item SIMD kernel specialization,
+    \item domain decomposition beyond demo MPI,
+    \item property-based tests for invariants,
+    \item GPU offload experimentation.
+  \end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Takeaways for Rust developers}
+\begin{enumerate}
+  \item FerrumMD already demonstrates an end-to-end MD stack in Rust.
+  \item The project is a strong playground for systems + scientific computing ideas.
+  \item You can contribute without deep prior MD experience by starting from architecture and tooling modules.
+\end{enumerate}
+\vspace{0.8em}
+\centering
+\large Questions \& discussion
+\end{frame}
+
+\end{document}
