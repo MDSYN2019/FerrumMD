@@ -5,7 +5,6 @@ to molecules with bonded interactions and force fields requires adding new types
 of interactions
 
  */
-
 use crate::lennard_jones_simulations::minimum_image_convention;
 use crate::lennard_jones_simulations::InitOutput;
 use crate::lennard_jones_simulations::LJParameters;
@@ -368,18 +367,21 @@ pub fn apply_all_bonded_forces_and_energy(
     let mut energy = 0.0;
 
     for b in bonds {
+        // loop over all bonds and apply the bond forces and energy
         energy += compute_bond_force(atoms, b, box_length);
     }
     for angle in angles {
+        // loop over all angles and apply the angle forces and energy
         energy += compute_angle_force(atoms, angle, box_length);
     }
     for dihedral in dihedrals {
+        // loop over all dihedral and apply the dihedral forces and energy
         energy += compute_dihedral_force(atoms, dihedral, box_length);
     }
     for improper in impropers {
+        // loop over all improper and apply the improper forces and energy
         energy += compute_improper_force(atoms, improper, box_length);
     }
-
     energy
 }
 
@@ -388,11 +390,12 @@ pub fn apply_bonded_forces_and_energy(
     bonds: &[Bond],
     box_length: f64,
 ) -> f64 {
-    apply_all_bonded_forces_and_energy(atoms, bonds, &[], &[], &[], box_length)
+    apply_all_bonded_forces_and_energy(atoms, bonds, &[], &[], &[], box_length) // only apply bond forces and energy
 }
 
 pub fn make_h2_system() -> System {
     /*
+
     Reduced units:
 
     mass = 1.0 for each H (you can sue 1.0 amu reduced)
@@ -406,6 +409,7 @@ pub fn make_h2_system() -> System {
     let x = 0.5 * r0;
 
     let mut atoms = vec![
+        //
         Particle {
             id: 0,
             position: Vector3::new(-x, 0.0, 0.0),
@@ -438,7 +442,7 @@ pub fn make_h2_system() -> System {
         },
     ];
 
-    let stretch = 0.05;
+    let stretch = 0.05; // stretch the bond by 0.05 units to make sure we have nonzero forces and energy at the start of the simulation
     atoms[1].position.x += 0.5 * stretch;
     atoms[0].position.x -= 0.5 * stretch;
 

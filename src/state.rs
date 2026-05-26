@@ -10,13 +10,14 @@ pub trait system_computation {
 
 pub mod state {
     /*
-        The state struct represents the current state of the simulation, including the system configuration and the potential energy,
-        which is used for replica exchange and other analyses.
+    The state struct represents the current state of the simulation, including the system configuration and the potential energy,
+    which is used for replica exchange and other analyses.
     */
     pub struct state {
         pub system: InitOutput,
         pub system_potential_energy: f64,
     }
+
     impl state {
         pub fn new(system: InitOutput) -> Self {
             // initialize the state with the system configuration and compute the initial potential energy

@@ -21,6 +21,9 @@ pub mod lennard_jones_simulations {
             Angle, Bond, Dihedral, Improper, Particle, System,
         },
         parameters::lj_parameters::lennard_jones_potential,
+        replica_exchange::replica_exchange::{
+            attempt_exchange_particles_temperature, exchange_probability, Replica,
+        },
         thermostat_barostat::{
             andersen::andersen::apply_andersen_collisions,
             nose_hoover::nose_hoover::apply_thermostat_nose_hoover_particles,

@@ -41,23 +41,15 @@ pub mod replica_exchange {
 	pub attempted_exchange: usize,
     }
     
-    //pub struct SystemState {
-    //    pub positions: Vec<Vec3>,
-    //    pub velocitirs: Vec<Vec3>,
-    //    pub forces: Vec<Vec3>,
-    //}
     // methods for the replica, such as updating state, calculating energy
     pub fn attempt_exchange_particles_temperature(replica_1 : &mut Replica, replica_2; &mut Replica) -> () {
 	replica_1.attempted_exchange += 1;
 	replica_2.attempted_exchange += 2;
-
 	let prob = exchange_probability(replica_1, replica_2);
-
-
 	if rand::random::<f64>() < prob {
 	    // exchange the states of the replicas
-
-	    // TODO - swapping the states
+	    replica_1.state.swap(&mut replica_2.state);
+	    replica_2.state.swap(&mut replica_1.state);	    
 	}
     }
     
