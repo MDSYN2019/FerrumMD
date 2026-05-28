@@ -192,42 +192,38 @@ pub mod lennard_jones_simulations {
 
     pub fn site_site_energy_calculation(particles: &mut Vec<Particle>, box_length: f64) -> f64 {
         /*
-        Computing the total Lennard-Jones energy between all distinct pairs of particles in a molecular system,
+        Computing the total Lennard-Jones energy between all distinct pairs of particls in a molecular system,
         using site-site interactions
 
         The coordinates r_ia of a site a in molecule i are stored in the elements r(:, i, a)
 
-            For example, if we have two diatomic molecules, then we have r_1a (site a of molecule 1) and
-            r_2a (site a of molecule 2). Each molecule is a diatomic molecule (for example, O2).
+        For example, if we have two diatomic molecules, then we have r_1a (site a of molecule 1) and
+        r_2a (site a of molecule 2). Each molecule is a diatomic molecule (for example, O2).
 
-            We already have a set of particles with the lennard jones parameters defined and stored within. Using
-            that data, we need to compute the site_site energy
+        We already have a set of particles with the lennard jones parameters defined and stored within. Using
+        that data, we need to compute the site_site energy
 
          */
-
         let mut total_energy = 0.0;
-
         for i in 0..particles.len() {
             for j in (i + 1)..particles.len() {
-                // double loop over all coordinates in the system
-
+                // Double loop over all coordinates in the system
                 let sigma_i = particles[i].lj_parameters.sigma; // for particle i, get the sigma
                 let epsilon_i = particles[i].lj_parameters.epsilon; // for particle i, get the epsilon
                 let sigma_j = particles[j].lj_parameters.sigma; // for particle j, get the sigma
                 let epsilon_j = particles[j].lj_parameters.epsilon; // for particle j, get the epsilon
-
-                // Using Lorentz-Bethelot mixing rules
+                                                                    // Using Lorentz-Bethelot mixing rules
                 let computed_sigma = (sigma_i + sigma_j) / 2.0;
                 let computed_epsilon = (epsilon_i * epsilon_j).sqrt();
                 let r_vec = particles[j].position - particles[i].position; // We have already applied PBC to wrap the positions
                 let r_vec_mic = minimum_image_convention(r_vec, box_length); // minimum image convention is used for computing the true closest distance between the partcle i and j, through the images rather than take the longest distance from within the same image
                 let r = r_vec_mic.norm();
                 let potential = lennard_jones_potential(r, computed_sigma, computed_epsilon);
-
                 // Sum the total energy with the pairwise potential in the system
                 total_energy += potential;
             }
         }
+
         total_energy
     }
 
@@ -267,6 +263,7 @@ pub mod lennard_jones_simulations {
     }
 
     fn maxwell_boltzmann_sigma(temp: f64, mass: f64) -> f64 {
+        // compute the standard deviation of the Maxwell-Boltzmann distribution for a given temperature and mass
         const KB_KJ_PER_MOL_K: f64 = 0.008_314_462_618_153_24;
         ((KB_KJ_PER_MOL_K * temp) / mass).sqrt()
     }
@@ -348,7 +345,7 @@ pub mod lennard_jones_simulations {
         }
     }
 
-    pub fn implement_shake() -> () {}
+    pub fn implement_shake() -> () {} // TODO - implement the shake algorithm for constraints
 
     fn sample_position_with_min_separation(
         rng: &mut impl Rng,
@@ -415,10 +412,10 @@ pub mod lennard_jones_simulations {
         cells: &mut Vec<MolecularCoordinates>,
     ) {
         /*
-                Computing forces between the single point particles
+        Computing forces between the single point particles
 
-            Todo - need to add a component where I can only need to loop through
-            the cells that are closest and only compute the forces between
+        Todo - need to add a component where I can only need to loop through
+        the cells that are closest and only compute the forces between
         the particles in these cells
 
                  */
@@ -449,8 +446,7 @@ pub mod lennard_jones_simulations {
                 }
             }
         }
-        // dedup the indices
-        dedup_permutation(&mut cell_match_storage); // TODO - understand the operation of this deduping
+        dedup_permutation(&mut cell_match_storage); // remove duplicate cell matches
 
         // loop over the cells
         for cell_i in 0..cell_match_storage.len() {
@@ -1824,8 +1820,6 @@ pub mod lennard_jones_simulations {
                 atom.update_position_verlet(dt); // the velocity has already been updated by a half step, so this will update the position by the half step
             }
 
-            // ----
-
             // 3) PBC
             pbc_update(particles, box_length);
 
@@ -2201,9 +2195,7 @@ pub mod lennard_jones_simulations {
     }
 
     /*
-
     Systems portion of the code
-
      */
 
     pub fn run_md_nve_systems(
