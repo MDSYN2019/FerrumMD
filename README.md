@@ -378,3 +378,71 @@ To support an end-to-end computational chemistry pipeline (hit finding → lead 
 4. MM/PBSA post-processing.
 5. QM/MM adapters.
 6. Campaign orchestration, dashboards, and AI integration.
+
+---
+
+## 🧫 Lipid-aware lead-optimisation services
+
+FerrumMD now includes a decision-layer scaffold for a focused trio of bespoke
+lead-optimisation workflows. These workflows target programmes that have
+already reduced a screening campaign to roughly 100 or fewer lead compounds
+and need to explain binding, membrane crossing, and practical routes to improve
+the series.
+
+### 1) Membrane permutation optimisation
+
+Compare each lead across disease- and tissue-relevant bilayer compositions
+rather than treating the membrane as an inert POPC slab. The ranking API
+combines:
+
+- membrane-crossing free-energy barriers;
+- protein binding free energy;
+- bilayer disruption or instability;
+- statistical uncertainty.
+
+The result is a reproducible, weighted ranking that can identify compounds
+whose apparent potency depends on a particular lipid environment.
+
+### 2) Lipid-aware pocket R-group optimisation
+
+Use FEgrow (through a future adapter) to enumerate and place R-group designs in
+a membrane-protein pocket, then augment its pocket score with:
+
+- membrane transfer/desolvation cost;
+- steric-clash penalties from the protein–bilayer system;
+- synthetic accessibility.
+
+This prevents selecting a substituent solely because it improves a static
+pocket interaction while making membrane access or bilayer compatibility
+worse. The Rust API accepts FEgrow-compatible proposal records and returns a
+ranked design series.
+
+### 3) Bilayer-context fragment molecular orbital analysis
+
+Import pair interaction energies from an external FMO quantum-chemistry
+calculation and decompose ligand contacts into:
+
+- protein residues;
+- lipids;
+- structural waters;
+- cofactors.
+
+Lipid interactions remain a first-class output instead of disappearing into a
+generic environment term. The summary also reports the strongest favourable
+contacts to give medicinal chemists a direct, interpretable explanation for
+why a lead binds.
+
+### Implemented API
+
+The `lead_optimization` module currently supplies:
+
+- validated membrane composition records;
+- membrane-permutation multi-objective ranking;
+- lipid-aware R-group proposal ranking;
+- ligand-centric FMO interaction decomposition;
+- unit tests for validation and ranking behaviour.
+
+Simulation generation, FEgrow execution, and external FMO engine invocation
+remain adapters around this analysis layer. This keeps FerrumMD usable with its
+native engine or with steered OpenMM workflows while preserving one campaign
+reporting model.

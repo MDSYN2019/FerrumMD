@@ -74,6 +74,7 @@ extern crate assert_type_eq;
 // src/parameters.rs
 pub mod cell;
 pub mod error;
+pub mod lead_optimization;
 pub mod molecule;
 pub mod parameters;
 #[cfg(feature = "python")]
