@@ -378,3 +378,13 @@ To support an end-to-end computational chemistry pipeline (hit finding → lead 
 4. MM/PBSA post-processing.
 5. QM/MM adapters.
 6. Campaign orchestration, dashboards, and AI integration.
+
+## 🧪 Quantum chemistry: HF, FMO2, and PIEDA
+
+FerrumMD includes a small closed-shell Hartree-Fock SCF kernel in `quantum_chemistry` for experimentation with AO-basis matrices and electron-repulsion integrals. The same kernel now backs a fragment molecular orbital (FMO2) driver:
+
+- Define each `FmoFragment` with owned AO basis indices, closed-shell electron count, and fragment nuclear repulsion.
+- Build an `FmoSystem` from a parent `ScfSystem`; it extracts monomer and dimer subproblems automatically.
+- Run `FmoSystem::run_fmo2` to obtain the FMO2 total energy, monomer energies, pair interaction energies, and a lightweight PIEDA-style pair decomposition.
+
+The PIEDA output currently reports point-charge electrostatics from fragment centers/charges, assigns the remaining HF pair interaction to exchange-repulsion, and exposes charge-transfer and dispersion placeholders for future correlated or embedded methods.
