@@ -5,6 +5,7 @@ use nalgebra::{linalg::SymmetricEigen, DMatrix};
 /// All matrices are in an AO basis and use chemist's notation for two-electron
 /// integrals: (μν|λσ).
 
+#[derive(Clone, Debug)]
 pub struct ScfSystem {
     pub overlap: DMatrix<f64>,
     pub core_hamiltonian: DMatrix<f64>,
@@ -13,6 +14,7 @@ pub struct ScfSystem {
     pub n_electrons: usize,
 }
 
+#[derive(Clone, Debug)]
 pub struct ScfResult {
     pub electronic_energy: f64,
     pub total_energy: f64,
@@ -182,6 +184,234 @@ impl ScfSystem {
     }
 }
 
+/// A fragment definition for fragment molecular orbital (FMO) calculations.
+///
+/// `basis_indices` selects the AO rows/columns owned by the fragment in the
+/// parent `ScfSystem`. `n_electrons` must currently be even because the
+/// underlying SCF implementation is restricted to closed-shell RHF.
+#[derive(Clone, Debug)]
+pub struct FmoFragment {
+    pub name: String,
+    pub basis_indices: Vec<usize>,
+    pub n_electrons: usize,
+    pub nuclear_repulsion: f64,
+    pub net_charge: f64,
+    pub center: [f64; 3],
+}
+
+impl FmoFragment {
+    pub fn new(
+        name: impl Into<String>,
+        basis_indices: Vec<usize>,
+        n_electrons: usize,
+        nuclear_repulsion: f64,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            basis_indices,
+            n_electrons,
+            nuclear_repulsion,
+            net_charge: 0.0,
+            center: [0.0; 3],
+        }
+    }
+
+    pub fn with_pieda_site(mut self, net_charge: f64, center: [f64; 3]) -> Self {
+        self.net_charge = net_charge;
+        self.center = center;
+        self
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FmoPairConfig {
+    pub i: usize,
+    pub j: usize,
+    pub nuclear_repulsion: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct FmoMonomerResult {
+    pub fragment: String,
+    pub energy: f64,
+    pub scf: ScfResult,
+}
+
+#[derive(Clone, Debug)]
+pub struct PiedaPairResult {
+    pub fragment_i: String,
+    pub fragment_j: String,
+    pub dimer_energy: f64,
+    pub interaction_energy: f64,
+    pub electrostatic: f64,
+    pub exchange_repulsion: f64,
+    pub charge_transfer: f64,
+    pub dispersion: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct FmoResult {
+    pub total_energy: f64,
+    pub monomers: Vec<FmoMonomerResult>,
+    pub pairs: Vec<PiedaPairResult>,
+    pub converged: bool,
+}
+
+/// FMO2 driver backed by the closed-shell Hartree-Fock SCF implementation.
+///
+/// This implementation computes embedded-data-free gas-phase FMO2 energies:
+/// E(FMO2) = Σ_I E_I + Σ_{I<J}(E_IJ - E_I - E_J).  The PIEDA fields are a
+/// pragmatic decomposition suitable for diagnostics: electrostatics is computed
+/// from fragment point charges and centers, exchange-repulsion is the remaining
+/// HF interaction after optional charge-transfer/dispersion placeholders.
+pub struct FmoSystem {
+    pub parent: ScfSystem,
+    pub fragments: Vec<FmoFragment>,
+    pub pair_configs: Vec<FmoPairConfig>,
+}
+
+impl FmoSystem {
+    pub fn new(parent: ScfSystem, fragments: Vec<FmoFragment>) -> Self {
+        let mut pair_configs = Vec::new();
+        for i in 0..fragments.len() {
+            for j in (i + 1)..fragments.len() {
+                pair_configs.push(FmoPairConfig {
+                    i,
+                    j,
+                    nuclear_repulsion: 0.0,
+                });
+            }
+        }
+        Self {
+            parent,
+            fragments,
+            pair_configs,
+        }
+    }
+
+    pub fn with_pair_nuclear_repulsion(
+        mut self,
+        i: usize,
+        j: usize,
+        nuclear_repulsion: f64,
+    ) -> Self {
+        if let Some(pair) = self
+            .pair_configs
+            .iter_mut()
+            .find(|p| (p.i == i && p.j == j) || (p.i == j && p.j == i))
+        {
+            pair.nuclear_repulsion = nuclear_repulsion;
+        }
+        self
+    }
+
+    fn sub_system(&self, basis_indices: &[usize], n_electrons: usize) -> ScfSystem {
+        let n = basis_indices.len();
+        let overlap = DMatrix::from_fn(n, n, |a, b| {
+            self.parent.overlap[(basis_indices[a], basis_indices[b])]
+        });
+        let core_hamiltonian = DMatrix::from_fn(n, n, |a, b| {
+            self.parent.core_hamiltonian[(basis_indices[a], basis_indices[b])]
+        });
+        let mut eri = vec![0.0; n * n * n * n];
+        for mu in 0..n {
+            for nu in 0..n {
+                for lambda in 0..n {
+                    for sigma in 0..n {
+                        let sub_idx = (((mu * n + nu) * n + lambda) * n) + sigma;
+                        eri[sub_idx] = self.parent.eri(
+                            basis_indices[mu],
+                            basis_indices[nu],
+                            basis_indices[lambda],
+                            basis_indices[sigma],
+                        );
+                    }
+                }
+            }
+        }
+        ScfSystem::new(overlap, core_hamiltonian, eri, n_electrons)
+    }
+
+    fn pair_basis(&self, i: usize, j: usize) -> Vec<usize> {
+        let mut basis = self.fragments[i].basis_indices.clone();
+        basis.extend_from_slice(&self.fragments[j].basis_indices);
+        basis
+    }
+
+    fn point_charge_electrostatic(&self, i: usize, j: usize) -> f64 {
+        let fi = &self.fragments[i];
+        let fj = &self.fragments[j];
+        let dx = fi.center[0] - fj.center[0];
+        let dy = fi.center[1] - fj.center[1];
+        let dz = fi.center[2] - fj.center[2];
+        let r = (dx * dx + dy * dy + dz * dz).sqrt();
+        if r <= f64::EPSILON {
+            0.0
+        } else {
+            fi.net_charge * fj.net_charge / r
+        }
+    }
+
+    pub fn run_fmo2(&self, max_iter: usize, energy_tol: f64, density_tol: f64) -> FmoResult {
+        let mut monomers = Vec::with_capacity(self.fragments.len());
+        let mut converged = true;
+        for fragment in &self.fragments {
+            let system = self.sub_system(&fragment.basis_indices, fragment.n_electrons);
+            let scf = system.run_scf(
+                fragment.nuclear_repulsion,
+                max_iter,
+                energy_tol,
+                density_tol,
+            );
+            converged &= scf.converged;
+            monomers.push(FmoMonomerResult {
+                fragment: fragment.name.clone(),
+                energy: scf.total_energy,
+                scf,
+            });
+        }
+
+        let mut total_energy: f64 = monomers.iter().map(|m| m.energy).sum();
+        let mut pairs = Vec::with_capacity(self.pair_configs.len());
+        for pair in &self.pair_configs {
+            let basis = self.pair_basis(pair.i, pair.j);
+            let electrons = self.fragments[pair.i].n_electrons + self.fragments[pair.j].n_electrons;
+            let scf = self.sub_system(&basis, electrons).run_scf(
+                pair.nuclear_repulsion,
+                max_iter,
+                energy_tol,
+                density_tol,
+            );
+            converged &= scf.converged;
+            let interaction_energy =
+                scf.total_energy - monomers[pair.i].energy - monomers[pair.j].energy;
+            total_energy += interaction_energy;
+            let electrostatic = self.point_charge_electrostatic(pair.i, pair.j);
+            let charge_transfer = 0.0;
+            let dispersion = 0.0;
+            let exchange_repulsion =
+                interaction_energy - electrostatic - charge_transfer - dispersion;
+            pairs.push(PiedaPairResult {
+                fragment_i: self.fragments[pair.i].name.clone(),
+                fragment_j: self.fragments[pair.j].name.clone(),
+                dimer_energy: scf.total_energy,
+                interaction_energy,
+                electrostatic,
+                exchange_repulsion,
+                charge_transfer,
+                dispersion,
+            });
+        }
+
+        FmoResult {
+            total_energy,
+            monomers,
+            pairs,
+            converged,
+        }
+    }
+}
+
 /// Shared output object for SCF-like quantum templates.
 pub struct TemplateScfResult {
     pub electronic_energy: f64,
@@ -310,6 +540,31 @@ mod tests {
         assert!((result.electronic_energy - expected_electronic).abs() < 1e-10);
         assert!((result.total_energy - expected_electronic).abs() < 1e-10);
         assert!(result.orbital_energies[0] < result.orbital_energies[1]);
+    }
+
+    #[test]
+    fn fmo2_and_pieda_two_fragment_non_interacting_case() {
+        let overlap = DMatrix::identity(2, 2);
+        let core_h = DMatrix::from_diagonal(&nalgebra::DVector::from_vec(vec![-1.0, -0.5]));
+        let eri = vec![0.0; 16];
+        let parent = ScfSystem::new(overlap, core_h, eri, 4);
+        let fragments = vec![
+            FmoFragment::new("A", vec![0], 2, 0.0).with_pieda_site(1.0, [0.0, 0.0, 0.0]),
+            FmoFragment::new("B", vec![1], 2, 0.0).with_pieda_site(-1.0, [2.0, 0.0, 0.0]),
+        ];
+
+        let fmo = FmoSystem::new(parent, fragments);
+        let result = fmo.run_fmo2(50, 1e-12, 1e-12);
+
+        assert!(result.converged);
+        assert_eq!(result.monomers.len(), 2);
+        assert_eq!(result.pairs.len(), 1);
+        assert!((result.monomers[0].energy + 2.0).abs() < 1e-10);
+        assert!((result.monomers[1].energy + 1.0).abs() < 1e-10);
+        assert!((result.total_energy + 3.0).abs() < 1e-10);
+        assert!((result.pairs[0].interaction_energy).abs() < 1e-10);
+        assert!((result.pairs[0].electrostatic + 0.5).abs() < 1e-10);
+        assert!((result.pairs[0].exchange_repulsion - 0.5).abs() < 1e-10);
     }
 
     #[test]
