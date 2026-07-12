@@ -45,6 +45,8 @@ Implements Lennard-Jones (LJ) interactions, bonded forces, velocity-Verlet time 
 - LAMMPS data/dump readers (`molecule::io::{read_lammps_data, read_lammps_dump}`)  
 - Martini `.itp` force-field reader + converter (`molecule::martini::MartiniForceField`)  
 - CHARMM-style topology/parameter reader + converter (`molecule::charmm::CharmmForceField`)  
+- Fragment molecular orbital (FMO2) Hartree-Fock driver with PIEDA-style pair diagnostics
+- FMO-SCOP IFIE/PIEDA TSV parsing plus charge-class and residue-pair median summaries
 
 ---
 
@@ -62,6 +64,18 @@ FerrumMD uses a single explicit MD unit system internally:
 - **Coulomb prefactor:** `138.935457644 kJ mol^-1 nm e^-2`
 
 GRO I/O is now unit-preserving (nm in file and nm in memory), so there is no hidden nm↔Å conversion path.
+
+## ⚛️ FMO-SCOP IFIE/PIEDA analysis
+
+FerrumMD includes a lightweight implementation path for the FMO-SCOP workflow described in the Scientific Data FMO dataset paper. The quantum module can:
+
+- Run small closed-shell FMO2 examples with pair interaction diagnostics.
+- Parse FMO-SCOP-style TSV rows with `pdbid`, fragment identities, IFIE, ES, EX, CT+mix, DI, distance, approximation flag, and fragment charges.
+- Exclude dimer-ES approximation rows (`approx = T`) from statistical summaries when PIEDA terms are not available.
+- Group interactions by fragment charge class, matching the paper's neutral/charged categories.
+- Build order-independent residue-pair median summaries for ES, EX, CT+mix, DI, and IFIE values.
+
+The public entry points live in `sang_md::quantum_chemistry`, including `read_fmo_scop_tsv`, `summarize_by_charge_class`, and `summarize_by_residue_pair`.
 
 ---
 
