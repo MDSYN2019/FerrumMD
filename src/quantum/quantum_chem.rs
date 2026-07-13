@@ -412,6 +412,243 @@ impl FmoSystem {
     }
 }
 
+use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::error::Error;
+use std::fmt;
+use std::io::BufRead;
+
+/// One row from the FMO-SCOP-29Jun2022 IFIE/PIEDA TSV files described by
+/// Takaya et al. Scientific Data 2024.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FmoScopRecord {
+    pub pdb_id: String,
+    pub i_chain: String,
+    pub j_chain: String,
+    pub i_pair: i32,
+    pub j_pair: i32,
+    pub i_name: String,
+    pub j_name: String,
+    pub ifie: f64,
+    pub electrostatic: f64,
+    pub exchange_repulsion: f64,
+    pub charge_transfer_mix: f64,
+    pub dispersion: f64,
+    pub distance: f64,
+    pub approx: bool,
+    pub i_charge: i32,
+    pub j_charge: i32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FmoScopParseError {
+    pub line: usize,
+    pub message: String,
+}
+
+impl fmt::Display for FmoScopParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "FMO-SCOP parse error on line {}: {}",
+            self.line, self.message
+        )
+    }
+}
+
+impl Error for FmoScopParseError {}
+
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+pub enum FragmentChargeClass {
+    NeutralNeutral,
+    AttractiveCharged,
+    PositiveNeutral,
+    NegativeNeutral,
+    PositivePositive,
+    NegativeNegative,
+    Other,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PiedaSummary {
+    pub count: usize,
+    pub median_ifie: f64,
+    pub median_electrostatic: f64,
+    pub median_exchange_repulsion: f64,
+    pub median_charge_transfer_mix: f64,
+    pub median_dispersion: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResiduePairPiedaSummary {
+    pub residue_a: String,
+    pub residue_b: String,
+    pub summary: PiedaSummary,
+}
+
+impl FmoScopRecord {
+    pub fn parse_tsv_line(line_number: usize, line: &str) -> Result<Self, FmoScopParseError> {
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() != 16 {
+            return Err(FmoScopParseError {
+                line: line_number,
+                message: format!("expected 16 tab-separated fields, found {}", fields.len()),
+            });
+        }
+
+        Ok(Self {
+            pdb_id: fields[0].to_string(),
+            i_chain: fields[1].to_string(),
+            j_chain: fields[2].to_string(),
+            i_pair: parse_field(line_number, "Ipair", fields[3])?,
+            j_pair: parse_field(line_number, "Jpair", fields[4])?,
+            i_name: fields[5].to_string(),
+            j_name: fields[6].to_string(),
+            ifie: parse_field(line_number, "IFIE", fields[7])?,
+            electrostatic: parse_field(line_number, "ES", fields[8])?,
+            exchange_repulsion: parse_field(line_number, "EX", fields[9])?,
+            charge_transfer_mix: parse_field(line_number, "CT", fields[10])?,
+            dispersion: parse_field(line_number, "DI_MP2", fields[11])?,
+            distance: parse_field(line_number, "Dist", fields[12])?,
+            approx: match fields[13] {
+                "T" | "t" | "true" | "TRUE" | "1" => true,
+                "F" | "f" | "false" | "FALSE" | "0" => false,
+                value => {
+                    return Err(FmoScopParseError {
+                        line: line_number,
+                        message: format!("invalid approx value '{value}'"),
+                    })
+                }
+            },
+            i_charge: parse_field(line_number, "Ielect", fields[14])?,
+            j_charge: parse_field(line_number, "Jelect", fields[15])?,
+        })
+    }
+
+    pub fn charge_class(&self) -> FragmentChargeClass {
+        match (self.i_charge.signum(), self.j_charge.signum()) {
+            (0, 0) => FragmentChargeClass::NeutralNeutral,
+            (1, -1) | (-1, 1) => FragmentChargeClass::AttractiveCharged,
+            (1, 0) | (0, 1) => FragmentChargeClass::PositiveNeutral,
+            (-1, 0) | (0, -1) => FragmentChargeClass::NegativeNeutral,
+            (1, 1) => FragmentChargeClass::PositivePositive,
+            (-1, -1) => FragmentChargeClass::NegativeNegative,
+            _ => FragmentChargeClass::Other,
+        }
+    }
+}
+
+fn parse_field<T>(line: usize, field: &str, value: &str) -> Result<T, FmoScopParseError>
+where
+    T: std::str::FromStr,
+    T::Err: fmt::Display,
+{
+    value.parse::<T>().map_err(|err| FmoScopParseError {
+        line,
+        message: format!("invalid {field} value '{value}': {err}"),
+    })
+}
+
+pub fn read_fmo_scop_tsv<R: BufRead>(reader: R) -> Result<Vec<FmoScopRecord>, FmoScopParseError> {
+    let mut records = Vec::new();
+    for (idx, line) in reader.lines().enumerate() {
+        let line_number = idx + 1;
+        let line = line.map_err(|err| FmoScopParseError {
+            line: line_number,
+            message: err.to_string(),
+        })?;
+        let trimmed = line.trim_end();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if records.is_empty() && looks_like_header(trimmed) {
+            continue;
+        }
+        records.push(FmoScopRecord::parse_tsv_line(line_number, trimmed)?);
+    }
+    Ok(records)
+}
+
+fn looks_like_header(line: &str) -> bool {
+    let first = line.split('\t').next().unwrap_or_default();
+    first.eq_ignore_ascii_case("pdbid") || first.eq_ignore_ascii_case("pdb_id")
+}
+
+pub fn summarize_by_charge_class(
+    records: &[FmoScopRecord],
+) -> HashMap<FragmentChargeClass, PiedaSummary> {
+    let mut grouped: HashMap<FragmentChargeClass, Vec<&FmoScopRecord>> = HashMap::new();
+    for record in records.iter().filter(|record| !record.approx) {
+        grouped
+            .entry(record.charge_class())
+            .or_default()
+            .push(record);
+    }
+    grouped
+        .into_iter()
+        .map(|(class, values)| (class, summarize_records(&values)))
+        .collect()
+}
+
+pub fn summarize_by_residue_pair(records: &[FmoScopRecord]) -> Vec<ResiduePairPiedaSummary> {
+    let mut grouped: HashMap<(String, String), Vec<&FmoScopRecord>> = HashMap::new();
+    for record in records.iter().filter(|record| !record.approx) {
+        let mut pair = [record.i_name.clone(), record.j_name.clone()];
+        pair.sort();
+        grouped
+            .entry((pair[0].clone(), pair[1].clone()))
+            .or_default()
+            .push(record);
+    }
+    let mut summaries: Vec<_> = grouped
+        .into_iter()
+        .map(|((residue_a, residue_b), values)| ResiduePairPiedaSummary {
+            residue_a,
+            residue_b,
+            summary: summarize_records(&values),
+        })
+        .collect();
+    summaries.sort_by(|a, b| match a.residue_a.cmp(&b.residue_a) {
+        Ordering::Equal => a.residue_b.cmp(&b.residue_b),
+        other => other,
+    });
+    summaries
+}
+
+fn summarize_records(records: &[&FmoScopRecord]) -> PiedaSummary {
+    PiedaSummary {
+        count: records.len(),
+        median_ifie: median(records.iter().map(|record| record.ifie).collect()),
+        median_electrostatic: median(records.iter().map(|record| record.electrostatic).collect()),
+        median_exchange_repulsion: median(
+            records
+                .iter()
+                .map(|record| record.exchange_repulsion)
+                .collect(),
+        ),
+        median_charge_transfer_mix: median(
+            records
+                .iter()
+                .map(|record| record.charge_transfer_mix)
+                .collect(),
+        ),
+        median_dispersion: median(records.iter().map(|record| record.dispersion).collect()),
+    }
+}
+
+fn median(mut values: Vec<f64>) -> f64 {
+    if values.is_empty() {
+        return f64::NAN;
+    }
+    values.sort_by(|a, b| a.total_cmp(b));
+    let mid = values.len() / 2;
+    if values.len() % 2 == 0 {
+        (values[mid - 1] + values[mid]) / 2.0
+    } else {
+        values[mid]
+    }
+}
+
 /// Shared output object for SCF-like quantum templates.
 pub struct TemplateScfResult {
     pub electronic_energy: f64,
@@ -565,6 +802,50 @@ mod tests {
         assert!((result.pairs[0].interaction_energy).abs() < 1e-10);
         assert!((result.pairs[0].electrostatic + 0.5).abs() < 1e-10);
         assert!((result.pairs[0].exchange_repulsion - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn fmo_scop_tsv_parser_and_charge_summaries() {
+        let data = "pdbid\tIchain\tJchain\tIpair\tJpair\tIname\tJname\tIFIE\tES\tEX\tCT\tDI_MP2\tDist\tapprox\tIelect\tJelect\n\
+1abc\tA\tA\t1\t2\tASP\tLYS\t-10.0\t-12.0\t3.0\t-0.5\t-0.5\t2.0\tF\t-1\t1\n\
+1abc\tA\tA\t3\t4\tALA\tGLY\t-2.0\t-1.0\t0.5\t-0.2\t-0.1\t4.0\tF\t0\t0\n\
+1abc\tA\tA\t5\t6\tALA\tGLY\t-100.0\t-100.0\t0.0\t0.0\t0.0\t9.0\tT\t0\t0\n";
+
+        let records = read_fmo_scop_tsv(std::io::Cursor::new(data)).unwrap();
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records[0].charge_class(),
+            FragmentChargeClass::AttractiveCharged
+        );
+        assert!(records[2].approx);
+
+        let charge_summaries = summarize_by_charge_class(&records);
+        let neutral = charge_summaries
+            .get(&FragmentChargeClass::NeutralNeutral)
+            .expect("neutral-neutral summary");
+        assert_eq!(neutral.count, 1);
+        assert_eq!(neutral.median_ifie, -2.0);
+
+        let attractive = charge_summaries
+            .get(&FragmentChargeClass::AttractiveCharged)
+            .expect("attractive charged summary");
+        assert_eq!(attractive.count, 1);
+        assert_eq!(attractive.median_electrostatic, -12.0);
+    }
+
+    #[test]
+    fn fmo_scop_residue_pair_summaries_are_order_independent() {
+        let data = "1abc\tA\tA\t1\t2\tGLY\tALA\t-1.0\t-0.5\t0.2\t-0.1\t-0.1\t3.0\tF\t0\t0\n\
+1abc\tA\tA\t3\t4\tALA\tGLY\t-3.0\t-1.5\t0.6\t-0.3\t-0.3\t3.5\tF\t0\t0\n";
+
+        let records = read_fmo_scop_tsv(std::io::Cursor::new(data)).unwrap();
+        let summaries = summarize_by_residue_pair(&records);
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].residue_a, "ALA");
+        assert_eq!(summaries[0].residue_b, "GLY");
+        assert_eq!(summaries[0].summary.count, 2);
+        assert_eq!(summaries[0].summary.median_ifie, -2.0);
+        assert_eq!(summaries[0].summary.median_exchange_repulsion, 0.4);
     }
 
     #[test]
