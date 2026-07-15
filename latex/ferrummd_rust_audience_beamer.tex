@@ -1,0 +1,310 @@
+\documentclass[aspectratio=169]{beamer}
+\usetheme{Madrid}
+\usecolortheme{seagull}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{booktabs}
+
+\title{FerrumMD: A Gentle Introduction to Molecular Dynamics in Rust}
+\subtitle{What molecular dynamics is, what FerrumMD does, and where Rust helps}
+\author{FerrumMD project overview}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+\begin{frame}{Who this talk is for}
+\begin{itemize}
+  \item People who are curious about scientific computing, Rust, or molecular simulation.
+  \item No molecular dynamics (MD) background is assumed.
+  \item You only need three ideas:
+  \begin{enumerate}
+    \item atoms and molecules can be modeled as particles,
+    \item particles move because forces act on them,
+    \item a computer simulation repeats a small update many times.
+  \end{enumerate}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{What problem does molecular dynamics solve?}
+\begin{itemize}
+  \item Experiments can show what molecules do, but not always every tiny motion.
+  \item MD creates a computational ``movie'' of atoms and molecules over time.
+  \item Typical questions:
+  \begin{itemize}
+    \item How does a liquid arrange itself?
+    \item Does a molecule remain stable?
+    \item How do temperature, pressure, or force-field choices affect behavior?
+  \end{itemize}
+  \item FerrumMD is a Rust codebase for building and studying these simulation workflows.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{MD in one minute}
+\begin{block}{Basic idea}
+Start with positions and velocities, compute forces, then move everything a tiny bit.
+\end{block}
+\begin{enumerate}
+  \item Read or build a molecular system.
+  \item Compute forces from the current geometry.
+  \item Update positions and velocities using Newton's laws.
+  \item Keep particles inside the simulation box and apply controls.
+  \item Save energies, temperatures, and trajectory frames.
+\end{enumerate}
+\vspace{0.5em}
+\centering
+\texttt{state $\rightarrow$ forces $\rightarrow$ updated state $\rightarrow$ repeat}
+\end{frame}
+
+\begin{frame}{A few useful words}
+\begin{description}
+  \item[Particle] An atom or coarse-grained bead with a position, velocity, and mass.
+  \item[Force field] Parameters and formulas that approximate molecular forces.
+  \item[Integrator] The numerical method that advances the simulation clock.
+  \item[Trajectory] The saved sequence of molecular snapshots.
+  \item[Ensemble] The thermodynamic conditions being approximated, such as constant energy or temperature.
+\end{description}
+\end{frame}
+
+\begin{frame}{Why this project matters}
+\begin{itemize}
+  \item \textbf{Learning value:} FerrumMD exposes the pieces of an MD engine in a readable systems language.
+  \item \textbf{Engineering value:} Rust's ownership model helps organize mutable simulation state safely.
+  \item \textbf{Scientific value:} explicit units, tests, and reproducible workflows are central to trustworthy simulations.
+  \item \textbf{Scope today:} the main building blocks rather than production-scale chemistry.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{FerrumMD at a glance}
+\begin{columns}[T]
+\column{0.48\textwidth}
+\textbf{Simulation core}
+\begin{itemize}
+  \item particle and molecule state
+  \item simulation box and periodic boundaries
+  \item Lennard--Jones and bonded forces
+  \item velocity-Verlet time stepping
+\end{itemize}
+
+\column{0.48\textwidth}
+\textbf{Workflow support}
+\begin{itemize}
+  \item temperature and pressure controls
+  \item input/output for common file formats
+  \item example water-like systems
+  \item optional viewer, Python, and MPI paths
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{The simulation state: what the program stores}
+\begin{itemize}
+  \item \textbf{Coordinates:} where each particle is in the box.
+  \item \textbf{Velocities:} how fast each particle is moving.
+  \item \textbf{Forces:} the current push or pull on each particle.
+  \item \textbf{Parameters:} masses, charges, bond constants, and interaction strengths.
+  \item \textbf{Box:} the finite volume that stands in for a larger material.
+\end{itemize}
+\begin{block}{Unit convention}
+FerrumMD keeps units explicit: nm, ps, amu, and kJ/mol.
+\end{block}
+\end{frame}
+
+\begin{frame}{Forces: how particles influence each other}
+\begin{columns}[T]
+\column{0.52\textwidth}
+\textbf{Nonbonded interactions}
+\begin{itemize}
+  \item Lennard--Jones models short-range attraction and repulsion.
+  \item Periodic boundaries make the small box behave more like bulk matter.
+  \item Cell subdivision reduces the number of pair checks.
+\end{itemize}
+
+\column{0.45\textwidth}
+\textbf{Bonded interactions}
+\begin{itemize}
+  \item Harmonic bonds act like springs between connected atoms.
+  \item Small molecular examples make the math easier to inspect.
+  \item Topology readers help import force-field definitions.
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Time stepping: turning forces into motion}
+\begin{itemize}
+  \item FerrumMD uses velocity-Verlet as a central integration method.
+  \item Each step is tiny, so many steps are needed for a useful trajectory.
+  \item The integrator must balance speed, stability, and energy behavior.
+  \item Initialization can sample velocities from a Maxwell--Boltzmann distribution.
+\end{itemize}
+\begin{block}{Beginner mental model}
+It is like a physics game loop, but numerical accuracy and units matter much more.
+\end{block}
+\end{frame}
+
+\begin{frame}{Temperature, pressure, and ensembles}
+\begin{itemize}
+  \item Real experiments often control temperature or pressure.
+  \item MD approximates these conditions with \emph{ensembles}:
+  \begin{itemize}
+    \item NVE: constant particles, volume, and energy,
+    \item NVT: constant particles, volume, and temperature,
+    \item NPT: constant particles, pressure, and temperature.
+  \end{itemize}
+  \item FerrumMD includes thermostat and barostat paths, including Berendsen and Nose--Hoover thermostats.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Inputs, outputs, and visualization}
+\begin{itemize}
+  \item Read starting structures and parameters from familiar molecular formats.
+  \item Supported inputs include PDB, GRO, LAMMPS data/dump, Martini, and CHARMM-style files.
+  \item Write GRO/XTC outputs so trajectories can be viewed in external tools such as VMD.
+  \item Optional Rust viewer and Python bindings provide extension points for demos and analysis.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{The honest Rust pitch}
+\begin{block}{Not the claim}
+Rust does \emph{not} make an MD engine automatically faster than C++.
+Well-written C++ MD engines can be extremely fast.
+\end{block}
+\begin{block}{The stronger claim}
+Rust offers C/C++-level native performance while making many dangerous scientific-code bugs harder to write.
+\end{block}
+\begin{itemize}
+  \item The goal is not to beat mature engines just by choosing Rust.
+  \item The goal is a safe, modular, maintainable path from research prototype to serious simulation software.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Rust advantage 1: memory safety without GC}
+\begin{itemize}
+  \item MD engines manipulate large arrays of positions, velocities, forces, neighbor lists, cell lists, bonds, and topology.
+  \item C/C++ bugs can include dangling pointers, use-after-free, double free, out-of-bounds access, and invalidated references.
+  \item Rust's ownership and borrowing rules catch many of these hazards at compile time.
+  \item Example MD hazard: mutating a particle array while another part of the code still holds references into it.
+\end{itemize}
+\begin{block}{Why this matters}
+Force loops, neighbor-list builds, integration, and boundary-condition updates are all mutation-heavy and aliasing-sensitive.
+\end{block}
+\end{frame}
+
+\begin{frame}{Rust advantage 2: safer parallelism}
+\begin{itemize}
+  \item MD wants parallelism in pair forces, domain decomposition, neighbor-list builds, reductions, and trajectory analysis.
+  \item The danger is two threads accidentally writing the same force entry or sharing mutable state unsafely.
+  \item Rust forces shared mutation to be explicit: locks, atomics, chunked mutable slices, or safe parallel iterators.
+  \item Good MD designs usually avoid ``mutex everywhere'':
+  \begin{itemize}
+    \item each worker owns a particle chunk, or
+    \item each worker writes to its own force buffer, then buffers are reduced safely.
+  \end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Rust advantage 3: encode simulation meaning in types}
+\begin{itemize}
+  \item An MD engine is not just math; it is a large state machine.
+  \item State includes box dimensions, cutoffs, thermostat/barostat state, masses, topology, random-number generators, and step counters.
+  \item Rust types can make invalid states harder to represent:
+  \begin{itemize}
+    \item \texttt{Positions}, \texttt{Velocities}, \texttt{Forces}, and \texttt{Masses} instead of anonymous arrays,
+    \item enums for algorithm choices such as no thermostat, Andersen, Berendsen, or Nose--Hoover,
+    \item separate immutable parameters from mutable evolving state.
+  \end{itemize}
+  \item The compiler becomes a strict reviewer when ownership or invariants change.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Rust advantage 4: tooling and modular architecture}
+\begin{columns}[T]
+\column{0.48\textwidth}
+\textbf{Cargo workflow}
+\begin{itemize}
+  \item \texttt{cargo build}
+  \item \texttt{cargo test}
+  \item \texttt{cargo bench}
+  \item \texttt{cargo doc}
+  \item \texttt{cargo fmt} and \texttt{cargo clippy}
+\end{itemize}
+
+\column{0.48\textwidth}
+\textbf{Engine design}
+\begin{itemize}
+  \item traits for force fields, integrators, and thermostats
+  \item feature flags for MPI, viewer, Python, or future GPU paths
+  \item unit tests for forces and regression tests for energy behavior
+  \item clean APIs instead of one giant procedural script
+\end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Rust advantage 5: FFI and research workflows}
+\begin{itemize}
+  \item Rust can interoperate with C, C++, Python, MPI libraries, and existing visualization or analysis tools.
+  \item A practical architecture is:
+  \begin{itemize}
+    \item Rust core engine for simulation kernels,
+    \item Python interface for setup, analysis, and experimentation,
+    \item file-format compatibility for tools such as VMD.
+  \end{itemize}
+  \item This supports a research workflow: prototype quickly, test carefully, and keep the performance-critical core compiled and typed.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Where C++ still has advantages}
+\begin{itemize}
+  \item C++ has a larger and older HPC ecosystem.
+  \item CUDA/HIP and GPU tooling are more mature in C++ workflows.
+  \item Many scientific developers already know C++.
+  \item Existing engines such as GROMACS, LAMMPS, NAMD, AMBER, and OpenMM have decades of optimization and validation.
+\end{itemize}
+\begin{block}{Positioning FerrumMD}
+FerrumMD should be pitched as a modern, safe, modular research engine---not as faster than mature production engines simply because it uses Rust.
+\end{block}
+\end{frame}
+
+\begin{frame}{How to read the codebase as a newcomer}
+\begin{enumerate}
+  \item Start with a runnable example to see the input, loop, and output flow.
+  \item Inspect the state and molecule modules to understand stored data.
+  \item Follow one force calculation from inputs to resulting forces and energy.
+  \item Then look at integrators, ensembles, and I/O formats.
+\end{enumerate}
+\begin{block}{Tip}
+You do not need to understand every force-field detail before contributing to tooling, tests, examples, or documentation.
+\end{block}
+\end{frame}
+
+\begin{frame}{Roadmap and open opportunities}
+\begin{itemize}
+  \item Rigid-water constraints such as SETTLE or SHAKE/RATTLE.
+  \item Topology-correct nonbonded exclusions and special pairs.
+  \item Electrostatics and units audits for stronger TIP3P fidelity.
+  \item Rust-focused opportunities:
+  \begin{itemize}
+    \item clearer examples and validation tests,
+    \item SIMD or GPU experiments,
+    \item stronger parallel decomposition beyond demo MPI,
+    \item property-based tests for physical invariants.
+  \end{itemize}
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Takeaways}
+\begin{enumerate}
+  \item MD is a repeated loop: compute forces, update motion, save observations.
+  \item FerrumMD provides an approachable Rust implementation of that loop and its surrounding workflow.
+  \item New contributors can start with examples, units, I/O, tests, and documentation before tackling advanced physics.
+\end{enumerate}
+\vspace{0.8em}
+\centering
+\large Questions \& discussion
+\end{frame}
+
+\end{document}

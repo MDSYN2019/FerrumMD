@@ -73,9 +73,12 @@ extern crate assert_type_eq;
 // src/molcule.rs
 // src/parameters.rs
 pub mod cell;
+pub mod cell_subdivision;
 pub mod error;
+pub mod lennard_jones_simulations;
 pub mod molecule;
 pub mod parameters;
+
 #[cfg(feature = "python")]
 mod python;
 #[path = "quantum/quantum_chem.rs"]
@@ -152,10 +155,6 @@ fn dedup_permutation(v: &mut Vec<Vec<i32>>) {
         seen.insert(key) // true if first time
     });
 }
-
-pub mod cell_subdivision;
-
-pub mod lennard_jones_simulations;
 
 #[cfg(test)]
 mod tests {

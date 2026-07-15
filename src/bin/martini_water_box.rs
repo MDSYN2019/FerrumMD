@@ -19,7 +19,7 @@ fn create_martini_water_box(
     epsilon: f64,
     rng: &mut StdRng,
 ) -> Result<Vec<Particle>, String> {
-    let n_particles = n_side * n_side * n_side;
+    let n_particles = 50; //n_side * n_side * n_side;
     let spacing = box_length / n_side as f64;
     let sigma_v = (temperature / mass).sqrt();
     let normal = Normal::new(0.0, sigma_v)
@@ -178,7 +178,7 @@ fn main() -> Result<(), String> {
     let dt_equil = 0.0002;
     let dt_prod = 0.0005;
     let nsteps_equil = 500;
-    let nsteps_prod = 1500;
+    let nsteps_prod = 10500;
     let equil_thermostat_tau = 0.02;
     let prod_thermostat_tau = 0.1;
     let minimization_steps = 100;

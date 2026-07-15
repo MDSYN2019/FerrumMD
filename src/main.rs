@@ -1,176 +1,231 @@
-//! ----------------------
-//! Author: Sang Young Noh
-//! ----------------------
+//! FerrumMD demo executable.
 //!
-//! ------------------------
-//! Last Updated: 22/02/2026
-//! ------------------------
-//!
-/*
+//! Demonstrates:
+//! - reading CHARMM and GROMACS/ITP force-field files
+//! - running a small Lennard-Jones MD example
+//! - running a simple molecular H2 system
 
-The HF-self_consistent_field is the standard first-principles
-approach for computing approximate quantum mechanical eigenstates
-of interacting fermion systems.
-
-Such systems include electrons in atoms, molecules, and condensed matter. Protons
-and neutrons in nuclei, and nuclear matter.
-*/
-
-use log::error;
-#[cfg(feature = "mpi")]
-use mpi::traits::*;
+use log::{error, info, warn};
 use std::env;
 
-use sang_md::lennard_jones_simulations; // this is in lib
-use sang_md::molecule::charmm;
-use sang_md::molecule::martini; // This module contains the itp reader
-use sang_md::molecule::molecule;
+#[cfg(feature = "mpi")]
+use mpi::traits::*;
+
+use sang_md::lennard_jones_simulations;
+use sang_md::molecule::{charmm, martini, molecule};
+
+const DEFAULT_INTEGRATOR: &str = "velocity_verlet";
+const DEFAULT_TEMPERATURE: f64 = 300.0;
+const DEFAULT_BOX_LENGTH: f64 = 10.0;
+const DEFAULT_TIME_STEP: f64 = 0.0005;
+const DEFAULT_CUTOFF: f64 = 10.0;
 
 fn main() {
-    // ------
+    init_logging();
+    run_forcefield_examples();
 
-    // let's try reading in a water forcefield
-    let tip3p_forcefield_charmm_string = charmm::CharmmForceField::read_file_new(
-        "/home/sang/Desktop/Sandbox/rust/FerrumMD/ff/tip3p_example/tip3p_sample.rtf",
-    );
-
-    println!(
-        "We have the following string as a water tip3p forcefield (charmm)
-         \n\n
-         The atom types we have is as follows: {:?}
-         The residue names we have is as follows: {:?}
-         The bonds we have is as follows: {:?}
-         ",
-        tip3p_forcefield_charmm_string.clone().unwrap().atom_types,
-        tip3p_forcefield_charmm_string.clone().unwrap().residue_name,
-        tip3p_forcefield_charmm_string.clone().unwrap().bonds,
-    );
-
-    // trying the equivalent using the itp reader
-
-    // ------
-    let tip3p_forcefield_itp_string =
-        martini::MartiniForceField::read_itp("ff/Charmm27.ff/charmm27.ff/tip3p.itp");
-
-    println!(
-        "We have the following string as a water tip3p forcefield (itp)
-         \n\n
-         The atom types we have is as follows: {:?}
-         The bonds we have is as follows: {:?}
-         ",
-        tip3p_forcefield_itp_string.clone().unwrap().atoms,
-        tip3p_forcefield_itp_string.clone().unwrap().bonds,
-    );
-
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
-    let integrator = env::args()
-        .find_map(|arg| arg.strip_prefix("--integrator=").map(str::to_owned))
-        .unwrap_or_else(|| "velocity_verlet".to_string());
-
-    let md_mode = match integrator.as_str() {
-        "velocity_verlet" => "berendsen",
-        "monte_carlo" => "monte_carlo",
-        other => {
-            log::warn!(
-                "Unknown integrator '{other}', falling back to velocity_verlet (Berendsen thermostat)."
-            );
-            "berendsen"
-        }
-    };
-
-    // main code for running molecular dynamics simulations - version 2
+    let integrator = parse_integrator_arg();
+    let md_mode = integrator_to_md_mode(&integrator);
 
     #[cfg(feature = "mpi")]
     let universe = mpi::initialize().expect("MPI initialization failed");
+
     #[cfg(feature = "mpi")]
     let world = universe.world();
-    // create a new system
-    let mut new_simulation_md =
-        match lennard_jones_simulations::create_atoms_with_set_positions_and_velocities(
-            3, 300.0, 30.0, 10.0, 10.0, false,
-        ) {
-            // How to handle errors - we are returning a result or a string
-            Ok(atoms) => atoms,
-            Err(e) => {
-                error!("Failed to create atoms: {e}");
-                return; // Exit early or handle the error as needed
-            }
-        };
-    if let sang_md::lennard_jones_simulations::InitOutput::Particles(particles) =
-        &mut new_simulation_md
-    {
-        for (idx, p) in particles.iter_mut().enumerate() {
-            p.charge = if idx % 2 == 0 { 1.0 } else { -1.0 };
-        }
-    }
 
     #[cfg(feature = "mpi")]
     {
         if world.rank() == 0 {
-            log::info!("Running MPI-enabled NVE example with integrator={integrator}");
+            info!("Running MPI-enabled MD example with integrator={integrator}");
         }
-        lennard_jones_simulations::run_md_nve_mpi(
-            &mut new_simulation_md,
-            30,
-            0.0005,
-            10.0,
-            md_mode,
-            &world,
-        );
+        run_lennard_jones_example_mpi(md_mode, &world);
+        run_h2_system_example_mpi(md_mode, &world);
     }
 
-    // When we aren't using MPI distrbuted computing
-
+    // serial execution if MPI is not enabled
     #[cfg(not(feature = "mpi"))]
     {
-        // running either the default velocity-verlet simulation or monte-carlo simulation
-        lennard_jones_simulations::run_md_nve(
-            &mut new_simulation_md,
-            30,
-            0.0005,
-            10.0,
-            md_mode,
-            30.0,
-        );
-        if md_mode != "monte_carlo" {
-            // running an andersen thermostat simulation after velocity-verlet demo
-            lennard_jones_simulations::run_md_nve(
-                &mut new_simulation_md,
-                3000,
-                0.0005,
-                10.0,
-                "andersen",
-                30.0,
+        info!("Running single-process MD example with integrator={integrator}");
+
+        run_lennard_jones_example(md_mode);
+        run_h2_system_example(md_mode);
+    }
+}
+
+fn init_logging() {
+    // Set up logging with a default level of INFO, configurable via the RUST_LOG environment variable
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+}
+
+fn parse_integrator_arg() -> String {
+    env::args()
+        .find_map(|arg| arg.strip_prefix("--integrator=").map(str::to_owned))
+        .unwrap_or_else(|| DEFAULT_INTEGRATOR.to_string()) // default to velocity_verlet if no argument is provided
+}
+
+fn integrator_to_md_mode(integrator: &str) -> &'static str {
+    match integrator {
+        "velocity_verlet" => "berendsen",
+        "monte_carlo" => "monte_carlo",
+        other => {
+            warn!(
+                "Unknown integrator '{other}', falling back to velocity_verlet \
+                 with Berendsen thermostat."
             );
+            "berendsen"
+        }
+    }
+}
+
+fn run_forcefield_examples() {
+    print_charmm_tip3p_example();
+    print_itp_tip3p_example();
+}
+
+fn print_charmm_tip3p_example() {
+    let path = "/home/sang/Desktop/Sandbox/rust/FerrumMD/ff/tip3p_example/tip3p_sample.rtf";
+
+    let forcefield = match charmm::CharmmForceField::read_file_new(path) {
+        Ok(forcefield) => forcefield,
+        Err(err) => {
+            error!("Failed to read CHARMM TIP3P force field from '{path}': {err}");
+            return;
+        }
+    };
+
+    println!(
+        "\nCHARMM TIP3P force field
+         \nAtom types: {:?}
+         \nResidue names: {:?}
+         \nBonds: {:?}\n",
+        forcefield.atom_types, forcefield.residue_name, forcefield.bonds,
+    );
+}
+
+fn print_itp_tip3p_example() {
+    let path = "ff/Charmm27.ff/charmm27.ff/tip3p.itp";
+
+    let forcefield = match martini::MartiniForceField::read_itp(path) {
+        Ok(forcefield) => forcefield,
+        Err(err) => {
+            error!("Failed to read ITP TIP3P force field from '{path}': {err}");
+            return;
+        }
+    };
+
+    println!(
+        "\nITP TIP3P force field
+         \nAtoms: {:?}
+         \nBonds: {:?}\n",
+        forcefield.atoms, forcefield.bonds,
+    );
+}
+
+fn create_charged_lennard_jones_system() -> Option<sang_md::lennard_jones_simulations::InitOutput> {
+    let mut system = match lennard_jones_simulations::create_atoms_with_set_positions_and_velocities(
+        3,
+        DEFAULT_TEMPERATURE,
+        30.0,
+        DEFAULT_BOX_LENGTH,
+        DEFAULT_BOX_LENGTH,
+        false,
+    ) {
+        Ok(system) => system,
+        Err(err) => {
+            error!("Failed to create Lennard-Jones atoms: {err}");
+            return None;
+        }
+    };
+
+    if let lennard_jones_simulations::InitOutput::Particles(particles) = &mut system {
+        for (idx, particle) in particles.iter_mut().enumerate() {
+            particle.charge = if idx % 2 == 0 { 1.0 } else { -1.0 };
         }
     }
 
-    // --------------------------------------------------------------------------------------//
-    // Systems demo (H2 molecules) with bonded + nonbonded interactions,
-    // now including electrostatics via the Ewald split in the MD engine.
-    let h2 = molecule::make_h2_system();
-    let mut systems_vec = molecule::create_systems(&h2, 12);
-    lennard_jones_simulations::set_molecular_positions_and_velocities(
-        &mut systems_vec,
-        300.0,
-        10.0,
+    Some(system)
+}
+
+#[cfg(not(feature = "mpi"))]
+fn run_lennard_jones_example(md_mode: &str) {
+    let Some(mut system) = create_charged_lennard_jones_system() else {
+        return;
+    };
+
+    lennard_jones_simulations::run_md_nve(
+        &mut system,
+        30,
+        DEFAULT_TIME_STEP,
+        DEFAULT_CUTOFF,
+        md_mode,
+        30.0,
     );
 
-    #[cfg(feature = "mpi")]
-    {
-        lennard_jones_simulations::run_md_nve_mpi(
-            &mut systems_vec,
-            30,
-            0.0005,
-            10.0,
-            md_mode,
-            &world,
+    if md_mode != "monte_carlo" {
+        lennard_jones_simulations::run_md_nve(
+            &mut system,
+            3000,
+            DEFAULT_TIME_STEP,
+            DEFAULT_CUTOFF,
+            "andersen",
+            30.0,
         );
     }
+}
 
-    #[cfg(not(feature = "mpi"))]
-    {
-        lennard_jones_simulations::run_md_nve(&mut systems_vec, 30, 0.0005, 10.0, md_mode, 30.0);
-    }
+#[cfg(feature = "mpi")]
+fn run_lennard_jones_example_mpi(md_mode: &str, world: &impl mpi::traits::Communicator) {
+    let Some(mut system) = create_charged_lennard_jones_system() else {
+        return;
+    };
+
+    lennard_jones_simulations::run_md_nve_mpi(
+        &mut system,
+        30,
+        DEFAULT_TIME_STEP,
+        DEFAULT_CUTOFF,
+        md_mode,
+        world,
+    );
+}
+
+fn create_h2_systems() -> sang_md::lennard_jones_simulations::InitOutput {
+    let h2 = molecule::make_h2_system();
+    let mut systems = molecule::create_systems(&h2, 12);
+
+    lennard_jones_simulations::set_molecular_positions_and_velocities(
+        &mut systems,
+        DEFAULT_TEMPERATURE,
+        DEFAULT_BOX_LENGTH,
+    );
+
+    systems
+}
+
+#[cfg(not(feature = "mpi"))]
+fn run_h2_system_example(md_mode: &str) {
+    let mut systems = create_h2_systems();
+
+    lennard_jones_simulations::run_md_nve(
+        &mut systems,
+        30,
+        DEFAULT_TIME_STEP,
+        DEFAULT_CUTOFF,
+        md_mode,
+        30.0,
+    );
+}
+
+#[cfg(feature = "mpi")]
+fn run_h2_system_example_mpi(md_mode: &str, world: &impl mpi::traits::Communicator) {
+    let mut systems = create_h2_systems();
+
+    lennard_jones_simulations::run_md_nve_mpi(
+        &mut systems,
+        30,
+        DEFAULT_TIME_STEP,
+        DEFAULT_CUTOFF,
+        md_mode,
+        world,
+    );
 }
