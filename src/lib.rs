@@ -76,6 +76,7 @@ pub mod cell;
 pub mod error;
 pub mod molecule;
 pub mod parameters;
+pub mod performance;
 #[cfg(feature = "python")]
 mod python;
 #[path = "quantum/quantum_chem.rs"]
