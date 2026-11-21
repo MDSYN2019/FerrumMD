@@ -81,6 +81,8 @@ The public entry points live in `sang_md::quantum_chemistry`, including `read_fm
 
 ## 🚀 Getting Started
 
+Returning to the project? See the [development guide](docs/development-guide.md) for a tour of the simulation code and the next implementation milestones.
+
 ### Install Rust
 You’ll need a stable Rust toolchain:
 
